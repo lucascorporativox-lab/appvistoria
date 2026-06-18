@@ -77,6 +77,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import org.apache.poi.ss.usermodel.WorkbookFactory
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.apache.poi.ss.usermodel.CellStyle
@@ -209,13 +210,15 @@ fun MainScreen() {
             painter = painterResource(id = R.drawable.fundo),
             contentDescription = "Imagem de fundo",
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.FillBounds
+            contentScale = ContentScale.FillBounds,
+            alpha = 0.18f
         )
-        
+
         Column(modifier = Modifier.fillMaxSize()) {
             TabRow(
                 selectedTabIndex = selectedTab,
-                containerColor = Color(0xFF1722F8) // Azul #1722f8
+                containerColor = Color(0xFF1722F8),
+                contentColor = Color.White
             ) {
                 Tab(
                     selected = selectedTab == 0,
@@ -348,17 +351,22 @@ fun ReportListScreen(
                 CircularProgressIndicator()
             }
         } else {
-            // Barra de pesquisa com fundo semitransparente
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { /* A mudança é gerenciada pelo componente pai */ },
-                label = { Text("Pesquisar") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Pesquisar") },
+                label = { Text("Pesquisar", color = Color.White) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Pesquisar", tint = Color.White) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 16.dp),
-                colors = TextFieldDefaults.outlinedTextFieldColors(
-                    containerColor = Color.White.copy(alpha = 0.7f)
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    unfocusedTextColor = Color.White,
+                    focusedTextColor = Color.White,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.6f),
+                    focusedBorderColor = Color.White,
+                    cursorColor = Color.White
                 )
             )
             
@@ -392,45 +400,49 @@ fun ReportListScreen(
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),
                             color = Color(0xFF1722F8),
-                            shape = MaterialTheme.shapes.medium
+                            shape = MaterialTheme.shapes.medium,
+                            shadowElevation = 6.dp
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
                                 Text(
                                     text = report.nomeEdificio,
-                                    style = MaterialTheme.typography.titleLarge.copy(
+                                    style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = Color.White
+                                    color = Color.White,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                
-                                Row {
-                                    IconButton(onClick = { 
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    IconButton(onClick = {
                                         reportToDelete = report
                                         showDeleteDialog = true
                                     }) {
                                         Icon(
-                                            Icons.Default.Delete, 
+                                            Icons.Default.Delete,
                                             contentDescription = "Excluir",
                                             tint = Color.White
                                         )
                                     }
-                                    IconButton(onClick = { 
+                                    IconButton(onClick = {
                                         navController.navigate("edit_report/${report.id}")
                                     }) {
                                         Icon(
-                                            Icons.Default.Edit, 
+                                            Icons.Default.Edit,
                                             contentDescription = "Editar",
                                             tint = Color.White
                                         )
                                     }
                                     IconButton(
-                                        onClick = { 
+                                        onClick = {
                                             try {
                                                 generatePdf(context, report)
                                             } catch (e: Exception) {
@@ -446,7 +458,7 @@ fun ReportListScreen(
                                         )
                                     }
                                     IconButton(
-                                        onClick = { 
+                                        onClick = {
                                             try {
                                                 generateExcel(context, listOf(report))
                                             } catch (e: Exception) {
@@ -468,7 +480,8 @@ fun ReportListScreen(
                 }
             }
 
-            // Filtro e botão de exportar com fundo azul
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.2f), thickness = 1.dp)
             Surface(
                 color = Color(0xFF1722F8),
                 modifier = Modifier.fillMaxWidth()
@@ -476,7 +489,7 @@ fun ReportListScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(8.dp),
+                        .padding(horizontal = 8.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -960,22 +973,27 @@ fun NewReportScreen(
             .verticalScroll(rememberScrollState())
     ) {
         Text(
-            text = "Relatórios",
+            text = "Novo Relatório",
             style = MaterialTheme.typography.headlineLarge.copy(
                 fontWeight = FontWeight.Bold
             ),
             modifier = Modifier.padding(bottom = 16.dp),
             color = Color.White
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Campo Responsável Pela Vistoria
-        Text(
-            text = "Responsável Pela Vistoria",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(20.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Responsável Pela Vistoria",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
         OutlinedTextField(
             value = responsavelVistoriaNome,
             onValueChange = { responsavelVistoriaNome = it },
@@ -984,8 +1002,8 @@ fun NewReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -993,15 +1011,19 @@ fun NewReportScreen(
             )
         )
 
-        // Seção de Informações do Local
-        Text(
-            text = "Endereço",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Endereço",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
         
         Column(
             modifier = Modifier
@@ -1101,15 +1123,19 @@ fun NewReportScreen(
             )
         }
 
-        // Seção de Informações do Edifício
-        Text(
-            text = "Informações do Edifício",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Informações do Edifício",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
 
         Row(
             modifier = Modifier
@@ -1211,8 +1237,8 @@ fun NewReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 16.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -1220,15 +1246,19 @@ fun NewReportScreen(
             )
         )
 
-        // Seção de Infraestrutura
-        Text(
-            text = "Infraestrutura",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Infraestrutura",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
 
         // Dropdown para número de provedores
         ExposedDropdownMenuBox(
@@ -1325,8 +1355,8 @@ fun NewReportScreen(
                 .padding(bottom = 16.dp),
             minLines = 3,
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -1342,8 +1372,8 @@ fun NewReportScreen(
             label = { Text("Observações Gerais", color = Color.White) },
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -1395,14 +1425,19 @@ fun NewReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp)
         ) {
-            Text(
-                text = "Meio de Entrada do Condomínio",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(bottom = 8.dp),
-                color = Color.White
-            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+            Row(
+                modifier = Modifier.padding(bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Meio de Entrada do Condomínio",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -1456,14 +1491,19 @@ fun NewReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp)
         ) {
-            Text(
-                text = "Tipo de Instalação",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(bottom = 8.dp),
-                color = Color.White
-            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+            Row(
+                modifier = Modifier.padding(bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Tipo de Instalação",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -1608,15 +1648,19 @@ fun NewReportScreen(
             }
         }
 
-        // Campos do responsável
-        Text(
-            text = "Responsável",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Responsável",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
         
         OutlinedTextField(
             value = responsavelNome,
@@ -1626,8 +1670,8 @@ fun NewReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -1653,8 +1697,8 @@ fun NewReportScreen(
             ),
             placeholder = { Text("00000000000", color = Color.White.copy(alpha = 0.7f)) },
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -2025,13 +2069,18 @@ fun EditReportScreen(
         
 
 
-        // Campo Responsável Pela Vistoria
-        Text(
-            text = "Responsável Pela Vistoria",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(20.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Responsável Pela Vistoria",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
         OutlinedTextField(
             value = responsavelVistoriaNome,
             onValueChange = { responsavelVistoriaNome = it },
@@ -2040,8 +2089,8 @@ fun EditReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -2049,15 +2098,19 @@ fun EditReportScreen(
             )
         )
 
-        // Seção de Informações do Local
-        Text(
-            text = "Endereço",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Endereço",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
         
         Column(
             modifier = Modifier
@@ -2157,15 +2210,19 @@ fun EditReportScreen(
             )
         }
 
-        // Seção de Informações do Edifício
-        Text(
-            text = "Informações do Edifício",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Informações do Edifício",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
 
         Row(
             modifier = Modifier
@@ -2267,8 +2324,8 @@ fun EditReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 16.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -2276,15 +2333,19 @@ fun EditReportScreen(
             )
         )
 
-        // Seção de Infraestrutura
-        Text(
-            text = "Infraestrutura",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Infraestrutura",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
 
         // Dropdown para número de provedores
         ExposedDropdownMenuBox(
@@ -2381,8 +2442,8 @@ fun EditReportScreen(
                 .padding(bottom = 16.dp),
             minLines = 3,
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -2398,8 +2459,8 @@ fun EditReportScreen(
             label = { Text("Observações Gerais", color = Color.White) },
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -2452,14 +2513,19 @@ fun EditReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp)
         ) {
-            Text(
-                text = "Meio de Entrada do Condomínio",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(bottom = 8.dp),
-                color = Color.White
-            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+            Row(
+                modifier = Modifier.padding(bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Meio de Entrada do Condomínio",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -2513,14 +2579,19 @@ fun EditReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp)
         ) {
-            Text(
-                text = "Tipo de Instalação",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(bottom = 8.dp),
-                color = Color.White
-            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+            Row(
+                modifier = Modifier.padding(bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Tipo de Instalação",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -2665,15 +2736,19 @@ fun EditReportScreen(
             }
         }
 
-        // Campos do responsável
-        Text(
-            text = "Responsável",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = Color.White
-        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
+        Row(
+            modifier = Modifier.padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Responsável",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
         
         OutlinedTextField(
             value = responsavelNome,
@@ -2683,8 +2758,8 @@ fun EditReportScreen(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
@@ -2710,8 +2785,8 @@ fun EditReportScreen(
             ),
             placeholder = { Text("00000000000", color = Color.White.copy(alpha = 0.7f)) },
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
                 unfocusedBorderColor = Color.White,
