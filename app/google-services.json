@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "742217097046",
+    "project_id": "vistoria-762d1",
+    "storage_bucket": "vistoria-762d1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:742217097046:android:b58562af9fe036be51c0f7",
+        "android_client_info": {
+          "package_name": "com.example.relatorios"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhwoxd5DYp5skdJdPqSq0gvi_2dW0XrAg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

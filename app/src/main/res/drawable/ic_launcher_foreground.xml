@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Fundo do ícone -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M0,0h108v108h-108z" />
+    
+    <!-- Edifício -->
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M54,20L30,40v48h48V40L54,20z M42,80h-4V60h4V80z M50,80h-4V60h4V80z M58,80h-4V60h4V80z M66,80h-4V60h4V80z M42,52h-4V32h4V52z M50,52h-4V32h4V52z M58,52h-4V32h4V52z M66,52h-4V32h4V52z" />
+    
+    <!-- Checklist -->
+    <path
+        android:fillColor="#F44336"
+        android:pathData="M80,20L76,20L76,16L80,16L80,20z M80,28L76,28L76,24L80,24L80,28z M80,36L76,36L76,32L80,32L80,36z M80,44L76,44L76,40L80,40L80,44z M80,52L76,52L76,48L80,48L80,52z M80,60L76,60L76,56L80,56L80,60z M80,68L76,68L76,64L80,64L80,68z M80,76L76,76L76,72L80,72L80,76z M80,84L76,84L76,80L80,80L80,84z M80,92L76,92L76,88L80,88L80,92z" />
+    
+    <!-- Marca de verificação -->
+    <path
+        android:fillColor="#F44336"
+        android:pathData="M88,40L84,36L76,44L80,48L88,40z" />
+    
+    <!-- Texto Myconnect Vistorias -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M20,90h68v4h-68z M20,96h68v4h-68z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M20,102h68v4h-68z" />
+</vector>

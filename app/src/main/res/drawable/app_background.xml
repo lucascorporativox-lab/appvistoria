@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Gradiente de fundo -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="135"
+                android:startColor="#1976D2"
+                android:centerColor="#2196F3"
+                android:endColor="#64B5F6"
+                android:type="linear" />
+        </shape>
+    </item>
+    <!-- Padrão de sobreposição com transparência -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#08FFFFFF"/>
+            <pattern
+                android:width="100dp"
+                android:height="100dp"
+                android:tileMode="repeat">
+                <path
+                    android:fillColor="#11FFFFFF"
+                    android:pathData="M0,0h100v100h-100z"/>
+            </pattern>
+        </shape>
+    </item>
+</layer-list> 
