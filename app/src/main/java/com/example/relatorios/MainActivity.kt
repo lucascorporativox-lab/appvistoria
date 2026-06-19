@@ -1038,8 +1038,8 @@ fun NewReportScreen(
                     .fillMaxWidth()
                     .padding(bottom = 8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                    focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                     unfocusedTextColor = Color.White,
                     focusedTextColor = Color.White,
                     unfocusedBorderColor = Color.White,
@@ -1055,8 +1055,8 @@ fun NewReportScreen(
                     .fillMaxWidth()
                     .padding(bottom = 8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                    focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                     unfocusedTextColor = Color.White,
                     focusedTextColor = Color.White,
                     unfocusedBorderColor = Color.White,
@@ -1079,8 +1079,8 @@ fun NewReportScreen(
                         .fillMaxWidth()
                         .menuAnchor(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                        focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                         unfocusedTextColor = Color.White,
                         focusedTextColor = Color.White,
                         unfocusedBorderColor = Color.White,
@@ -1113,8 +1113,8 @@ fun NewReportScreen(
                     .padding(top = 8.dp),
                 enabled = false,
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                    focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                     unfocusedTextColor = Color.White,
                     focusedTextColor = Color.White,
                     unfocusedBorderColor = Color.White,
@@ -1159,8 +1159,8 @@ fun NewReportScreen(
                         .fillMaxWidth()
                         .menuAnchor(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                        focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                         unfocusedTextColor = Color.White,
                         focusedTextColor = Color.White,
                         unfocusedBorderColor = Color.White,
@@ -1200,8 +1200,8 @@ fun NewReportScreen(
                         .fillMaxWidth()
                         .menuAnchor(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                        focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                         unfocusedTextColor = Color.White,
                         focusedTextColor = Color.White,
                         unfocusedBorderColor = Color.White,
@@ -1278,8 +1278,8 @@ fun NewReportScreen(
                     .fillMaxWidth()
                     .menuAnchor(),
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                    focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                     unfocusedTextColor = Color.White,
                     focusedTextColor = Color.White,
                     unfocusedBorderColor = Color.White,
@@ -1334,8 +1334,8 @@ fun NewReportScreen(
                             .fillMaxWidth()
                             .padding(bottom = 8.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                            focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                            unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                            focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                             unfocusedTextColor = Color.White,
                             focusedTextColor = Color.White,
                             unfocusedBorderColor = Color.White,
@@ -1582,8 +1582,8 @@ fun NewReportScreen(
                         .fillMaxWidth()
                         .menuAnchor(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                        focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                         unfocusedTextColor = Color.White,
                         focusedTextColor = Color.White,
                         unfocusedBorderColor = Color.White,
@@ -2125,8 +2125,8 @@ fun EditReportScreen(
                     .fillMaxWidth()
                     .padding(bottom = 8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                    focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                     unfocusedTextColor = Color.White,
                     focusedTextColor = Color.White,
                     unfocusedBorderColor = Color.White,
@@ -2142,8 +2142,8 @@ fun EditReportScreen(
                     .fillMaxWidth()
                     .padding(bottom = 8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                    focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                     unfocusedTextColor = Color.White,
                     focusedTextColor = Color.White,
                     unfocusedBorderColor = Color.White,
@@ -2166,8 +2166,8 @@ fun EditReportScreen(
                         .fillMaxWidth()
                         .menuAnchor(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                        focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                         unfocusedTextColor = Color.White,
                         focusedTextColor = Color.White,
                         unfocusedBorderColor = Color.White,
@@ -2200,8 +2200,8 @@ fun EditReportScreen(
                     .padding(top = 8.dp),
                 enabled = false,
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                    focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                     unfocusedTextColor = Color.White,
                     focusedTextColor = Color.White,
                     unfocusedBorderColor = Color.White,
@@ -2246,8 +2246,8 @@ fun EditReportScreen(
                         .fillMaxWidth()
                         .menuAnchor(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                        focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                         unfocusedTextColor = Color.White,
                         focusedTextColor = Color.White,
                         unfocusedBorderColor = Color.White,
@@ -2287,8 +2287,8 @@ fun EditReportScreen(
                         .fillMaxWidth()
                         .menuAnchor(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                        focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                         unfocusedTextColor = Color.White,
                         focusedTextColor = Color.White,
                         unfocusedBorderColor = Color.White,
@@ -2365,8 +2365,8 @@ fun EditReportScreen(
                     .fillMaxWidth()
                     .menuAnchor(),
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                    focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                     unfocusedTextColor = Color.White,
                     focusedTextColor = Color.White,
                     unfocusedBorderColor = Color.White,
@@ -2421,8 +2421,8 @@ fun EditReportScreen(
                             .fillMaxWidth()
                             .padding(bottom = 8.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                            focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                            unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                            focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                             unfocusedTextColor = Color.White,
                             focusedTextColor = Color.White,
                             unfocusedBorderColor = Color.White,
@@ -2670,8 +2670,8 @@ fun EditReportScreen(
                         .fillMaxWidth()
                         .menuAnchor(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color.Gray.copy(alpha = 0.5f),
-                        focusedContainerColor = Color.Gray.copy(alpha = 0.5f),
+                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
+                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
                         unfocusedTextColor = Color.White,
                         focusedTextColor = Color.White,
                         unfocusedBorderColor = Color.White,
