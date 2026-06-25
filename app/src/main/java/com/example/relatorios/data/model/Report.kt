@@ -27,5 +27,6 @@ data class Report(
     val quantidadeBlocos: String? = "0",
     val cep: String = "",
     val date: Date = Date(),
-    val aprovado: Boolean? = null
+    val aprovado: Boolean? = null,
+    val motivoResultado: String = ""
 ) 

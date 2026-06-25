@@ -287,6 +287,7 @@ fun MainScreen() {
     // ── Auto-update ─────────────────────────────────────────────
     var updateInfo by remember { mutableStateOf<AppVersionInfo?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf(0f) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -308,10 +309,15 @@ fun MainScreen() {
                     Text("Nova versão ${info.versionName} disponível. Deseja atualizar agora?")
                     if (isDownloading) {
                         LinearProgressIndicator(
+                            progress = downloadProgress,
                             modifier = Modifier.fillMaxWidth(),
                             color = Color(0xFF2D7DD2)
                         )
-                        Text("Baixando...", fontSize = 12.sp, color = Color(0xFF6B7A99))
+                        Text(
+                            if (downloadProgress > 0f) "${(downloadProgress * 100).toInt()}%" else "Conectando...",
+                            fontSize = 12.sp,
+                            color = Color(0xFF6B7A99)
+                        )
                     }
                 }
             },
@@ -320,34 +326,17 @@ fun MainScreen() {
                     Button(
                         onClick = {
                             isDownloading = true
-                            val downloadId = startApkDownload(context, info.downloadUrl)
-                            val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as DownloadManager
-                            scope.launch(Dispatchers.IO) {
-                                var done = false
-                                while (!done) {
-                                    delay(1500)
-                                    val query = DownloadManager.Query().setFilterById(downloadId)
-                                    dm.query(query)?.use { cursor ->
-                                        if (cursor.moveToFirst()) {
-                                            when (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
-                                                DownloadManager.STATUS_SUCCESSFUL -> {
-                                                    done = true
-                                                    withContext(Dispatchers.Main) {
-                                                        isDownloading = false
-                                                        updateInfo = null
-                                                        installDownloadedApk(context)
-                                                    }
-                                                }
-                                                DownloadManager.STATUS_FAILED -> {
-                                                    done = true
-                                                    withContext(Dispatchers.Main) {
-                                                        isDownloading = false
-                                                        Toast.makeText(context, "Falha ao baixar atualização", Toast.LENGTH_LONG).show()
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                            downloadProgress = 0f
+                            scope.launch {
+                                val success = downloadApk(context, info.releaseTag) { progress ->
+                                    downloadProgress = progress
+                                }
+                                isDownloading = false
+                                updateInfo = null
+                                if (success) {
+                                    installDownloadedApk(context)
+                                } else {
+                                    Toast.makeText(context, "Falha ao baixar atualização", Toast.LENGTH_LONG).show()
                                 }
                             }
                         },
@@ -1001,6 +990,7 @@ fun NewReportScreen(
     val shaftPhotosList = createdReport?.fotosShaft ?: emptyList()
     var responsavelTelefone by remember { mutableStateOf("") }
     var aprovado by remember { mutableStateOf<Boolean?>(null) }
+    var motivoResultado by remember { mutableStateOf("") }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var bairro by remember { mutableStateOf("") }
@@ -1516,6 +1506,15 @@ fun NewReportScreen(
                         }
                     }
                 }
+                OutlinedTextField(
+                    value = motivoResultado,
+                    onValueChange = { motivoResultado = it },
+                    label = { Text(if (aprovado == false) "Motivo da reprovação" else "Justificativa") },
+                    placeholder = { Text("Descreva o motivo do resultado...", color = Color(0xFFAAB4C8)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    colors = fieldColors
+                )
             }
 
             // ── Salvar ──────────────────────────────────────────────
@@ -1552,7 +1551,8 @@ fun NewReportScreen(
                             quantidadeBlocos = quantidadeBlocos,
                             cep = cep,
                             date = Date(),
-                            aprovado = aprovado
+                            aprovado = aprovado,
+                            motivoResultado = motivoResultado
                         )
                         viewModel.addReport(newReport)
                         viewModel.setCurrentReport(newReport.id)
@@ -1634,6 +1634,7 @@ fun EditReportScreen(
     var responsavelTelefone by remember { mutableStateOf(report.responsavelTelefone ?: "") }
     var quantidadeBlocos by remember { mutableStateOf(report.quantidadeBlocos ?: "") }
     var aprovado by remember { mutableStateOf(report.aprovado) }
+    var motivoResultado by remember { mutableStateOf(report.motivoResultado) }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var cep by remember { mutableStateOf(report.cep ?: "") }
@@ -2171,6 +2172,15 @@ fun EditReportScreen(
                         }
                     }
                 }
+                OutlinedTextField(
+                    value = motivoResultado,
+                    onValueChange = { motivoResultado = it },
+                    label = { Text(if (aprovado == false) "Motivo da reprovação" else "Justificativa") },
+                    placeholder = { Text("Descreva o motivo do resultado...", color = Color(0xFFAAB4C8)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    colors = fieldColors
+                )
             }
 
             Button(
@@ -2207,7 +2217,8 @@ fun EditReportScreen(
                             quantidadeBlocos = quantidadeBlocos,
                             cep = cep,
                             date = Date(),
-                            aprovado = aprovado
+                            aprovado = aprovado,
+                            motivoResultado = motivoResultado
                         )
                         viewModel.updateReport(updatedReport)
                         Log.d("EditReportScreen", "Relatório atualizado com sucesso")
