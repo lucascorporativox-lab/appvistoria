@@ -2449,18 +2449,14 @@ private fun generatePdf(context: AndroidContext, report: Report) {
 
         // ── Resultado ─────────────────────────────────────────────────
         document.add(secHeader("RESULTADO DA VISTORIA"))
-        val resultadoTexto = when (report.aprovado) {
-            true  -> "✓  APROVADO"
-            false -> "✗  REPROVADO"
-            null  -> "Não avaliado"
-        }
-        val resultadoCor = when (report.aprovado) {
-            true  -> DeviceRgb(30, 126, 69)
-            false -> DeviceRgb(192, 57, 43)
-            null  -> DeviceRgb(107, 122, 153)
-        }
-        document.add(Paragraph(resultadoTexto).setBold().setFontSize(13f).setFontColor(resultadoCor)
-            .setPaddingLeft(8f).setPaddingTop(8f).setPaddingBottom(8f))
+        document.add(infoTable(
+            "Resultado" to when (report.aprovado) {
+                true  -> "Aprovado"
+                false -> "Reprovado"
+                null  -> "Não avaliado"
+            },
+            "Justificativa" to report.motivoResultado.ifEmpty { "-" }
+        ))
 
         // ── Responsáveis ──────────────────────────────────────────────
         document.add(secHeader("RESPONSÁVEIS"))
@@ -2609,9 +2605,11 @@ private fun generateExcel(context: AndroidContext, reports: List<Report>) {
         headerRow.createCell(14).setCellValue("Responsável")
         headerRow.createCell(15).setCellValue("Telefone do Responsável")
         headerRow.createCell(16).setCellValue("CEP")
+        headerRow.createCell(17).setCellValue("Resultado")
+        headerRow.createCell(18).setCellValue("Motivo/Justificativa")
 
         // Aplicar estilo de cabeçalho
-        for (i in 0..16) {
+        for (i in 0..18) {
             headerRow.getCell(i).cellStyle = headerStyle
         }
         
@@ -2646,9 +2644,15 @@ private fun generateExcel(context: AndroidContext, reports: List<Report>) {
                 row.createCell(16).setCellValue(
                     report.cep.takeIf { it.isNotEmpty() }?.let { "${it.take(5)}-${it.drop(5)}" } ?: ""
                 )
+                row.createCell(17).setCellValue(when (report.aprovado) {
+                    true  -> "Aprovado"
+                    false -> "Reprovado"
+                    null  -> ""
+                })
+                row.createCell(18).setCellValue(report.motivoResultado)
 
                 // Aplicar estilo de quebra de texto em todas as células
-                for (i in 0..16) {
+                for (i in 0..18) {
                     row.getCell(i).cellStyle = cellStyle
                 }
             } catch (e: Exception) {
@@ -2675,7 +2679,9 @@ private fun generateExcel(context: AndroidContext, reports: List<Report>) {
         sheet.setColumnWidth(14, 30 * 256) // Responsável (Edifício)
         sheet.setColumnWidth(15, 20 * 256) // Telefone do Responsável (Edifício)
         sheet.setColumnWidth(16, 15 * 256) // CEP
-        
+        sheet.setColumnWidth(17, 15 * 256) // Resultado
+        sheet.setColumnWidth(18, 50 * 256) // Motivo/Justificativa
+
         Log.d("ExcelGeneration", "Preparando para salvar arquivo")
         // Salvar arquivo no diretório de downloads
         val fileName = "relatorios_${SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date())}.xlsx"
