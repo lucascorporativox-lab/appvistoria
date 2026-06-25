@@ -12,6 +12,8 @@ data class Report(
     val apartamentosPorAndar: Int = 0,
     val provedores: Int = 0,
     val nomesProvedores: List<String> = emptyList(),
+    val vagasOcupadasProvedores: List<String> = emptyList(),
+    val andaresProvedores: List<String> = emptyList(),
     val condicaoShaft: String = "",
     val fotosShaft: List<String> = emptyList(),
     val meioEntrada: String = "",
@@ -23,5 +25,7 @@ data class Report(
     val responsavelVistoriaNome: String = "", // Responsável pela vistoria
     val responsavelVistoriaTelefone: String = "",
     val quantidadeBlocos: String? = "0",
-    val date: Date = Date()
+    val cep: String = "",
+    val date: Date = Date(),
+    val aprovado: Boolean? = null
 ) 

@@ -35,7 +35,7 @@ fun RelatoriosTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = AppBlue.toArgb()
+            window.statusBarColor = Color(0xFF1A2B4A).toArgb()
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
         }
     }

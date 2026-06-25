@@ -70,6 +70,8 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
                                     apartamentosPorAndar = (data["apartamentosPorAndar"] as? Long)?.toInt() ?: 0,
                                     provedores = (data["provedores"] as? Long)?.toInt() ?: 0,
                                     nomesProvedores = data["nomesProvedores"] as? List<String> ?: emptyList(),
+                                    vagasOcupadasProvedores = data["vagasOcupadasProvedores"] as? List<String> ?: emptyList(),
+                                    andaresProvedores = data["andaresProvedores"] as? List<String> ?: emptyList(),
                                     condicaoShaft = data["condicaoShaft"] as? String ?: "",
                                     fotosShaft = data["fotosShaft"] as? List<String> ?: emptyList(),
                                     meioEntrada = data["meioEntrada"] as? String ?: "",
@@ -80,7 +82,9 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
                                     responsavelTelefone = data["responsavelTelefone"] as? String ?: "",
                                     responsavelVistoriaNome = data["responsavelVistoriaNome"] as? String ?: "",
                                     quantidadeBlocos = quantidadeBlocosString,
-                                    date = data["date"] as? Date ?: Date()
+                                    cep = data["cep"] as? String ?: "",
+                                    date = data["date"] as? Date ?: Date(),
+                                    aprovado = data["aprovado"] as? Boolean
                                 )
                             } else {
                                 null // Não foi possível obter dados, ignora este documento

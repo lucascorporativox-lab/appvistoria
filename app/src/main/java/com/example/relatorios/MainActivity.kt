@@ -67,6 +67,17 @@ import com.itextpdf.layout.element.Image as ITextImage
 import com.itextpdf.layout.element.Table
 import com.itextpdf.layout.element.Cell
 import com.itextpdf.io.image.ImageDataFactory
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import com.itextpdf.kernel.colors.ColorConstants
+import com.itextpdf.kernel.pdf.canvas.draw.SolidLine
+import com.itextpdf.layout.borders.Border
+import com.itextpdf.layout.borders.SolidBorder
+import com.itextpdf.layout.element.LineSeparator
+import com.itextpdf.kernel.colors.DeviceRgb
+import com.itextpdf.layout.properties.TextAlignment
+import com.itextpdf.layout.properties.UnitValue
+import com.itextpdf.layout.properties.VerticalAlignment as ITextVerticalAlignment
 import android.os.Environment as AndroidEnvironment
 import androidx.core.content.FileProvider
 import android.util.Log
@@ -89,6 +100,10 @@ import org.apache.poi.ss.usermodel.BorderStyle
 import org.apache.poi.ss.usermodel.Font
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -96,6 +111,10 @@ import androidx.compose.material3.Checkbox
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -114,6 +133,70 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.activity.result.ActivityResultLauncher
 import androidx.core.app.ActivityCompat
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.TextStyle as ComposeTextStyle
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Apartment
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.draw.clip
+
+enum class SortOrder(val label: String) {
+    DATA_DESC("Mais recente"),
+    DATA_ASC("Mais antiga"),
+    NOME("Nome (A-Z)"),
+    BAIRRO("Bairro (A-Z)")
+}
+
+class CepVisualTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val digits = text.text.take(8)
+        val out = buildString {
+            digits.forEachIndexed { i, c ->
+                if (i == 5) append('-')
+                append(c)
+            }
+        }
+        val offsetMapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int =
+                if (offset <= 5) offset else (offset + 1).coerceAtMost(out.length)
+            override fun transformedToOriginal(offset: Int): Int =
+                if (offset <= 5) offset else (offset - 1).coerceAtLeast(0)
+        }
+        return TransformedText(AnnotatedString(out), offsetMapping)
+    }
+}
+
+data class ViaCepResponse(
+    val logradouro: String,
+    val bairro: String,
+    val localidade: String,
+    val uf: String
+)
+
+suspend fun fetchViaCep(cep: String): ViaCepResponse? = withContext(Dispatchers.IO) {
+    try {
+        val client = OkHttpClient()
+        val request = Request.Builder()
+            .url("https://viacep.com.br/ws/$cep/json/")
+            .build()
+        val response = client.newCall(request).execute()
+        val body = response.body?.string() ?: return@withContext null
+        val json = JSONObject(body)
+        if (json.has("erro")) return@withContext null
+        ViaCepResponse(
+            logradouro = json.optString("logradouro", ""),
+            bairro     = json.optString("bairro", ""),
+            localidade = json.optString("localidade", ""),
+            uf         = json.optString("uf", "")
+        )
+    } catch (e: Exception) {
+        null
+    }
+}
 
 // Lista de bairros no topo do arquivo, após os imports
 val bairrosList = listOf(
@@ -199,59 +282,103 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     val navController = rememberNavController()
     val viewModel: ReportViewModel = viewModel()
-    var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(0) }
-    
-    Box(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        // Imagem de fundo
-        Image(
-            painter = painterResource(id = R.drawable.fundo),
-            contentDescription = "Imagem de fundo",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.FillBounds,
-            alpha = 0.18f
-        )
 
-        Column(modifier = Modifier.fillMaxSize()) {
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = Color(0xFF1722F8),
-                contentColor = Color.White
-            ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = { Text("Relatórios", color = Color.White) }
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = { Text("Novo", color = Color.White) }
-                )
-            }
-            
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = Color.Transparent
-            ) {
-                NavHost(
-                    navController = navController,
-                    startDestination = "main"
-                ) {
-                    composable("main") {
-                        when (selectedTab) {
-                            0 -> ReportListScreen(navController, viewModel, searchQuery)
-                            1 -> NewReportScreen(navController, viewModel, { selectedTab = it })
-                        }
-                    }
-                    
-                    composable("edit_report/{reportId}") { backStackEntry ->
-                        val reportId = backStackEntry.arguments?.getString("reportId") ?: ""
-                        EditReportScreen(navController, viewModel, reportId)
+    // ── Auto-update ─────────────────────────────────────────────
+    var updateInfo by remember { mutableStateOf<AppVersionInfo?>(null) }
+    var isDownloading by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        checkForUpdate(BuildConfig.VERSION_CODE) { info ->
+            updateInfo = info
+        }
+    }
+
+    updateInfo?.let { info ->
+        AlertDialog(
+            onDismissRequest = { if (!isDownloading) updateInfo = null },
+            containerColor = Color.White,
+            titleContentColor = Color(0xFF1A2B4A),
+            textContentColor = Color(0xFF4A5568),
+            title = { Text("Atualização disponível", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Nova versão ${info.versionName} disponível. Deseja atualizar agora?")
+                    if (isDownloading) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color(0xFF2D7DD2)
+                        )
+                        Text("Baixando...", fontSize = 12.sp, color = Color(0xFF6B7A99))
                     }
                 }
+            },
+            confirmButton = {
+                if (!isDownloading) {
+                    Button(
+                        onClick = {
+                            isDownloading = true
+                            val downloadId = startApkDownload(context, info.downloadUrl)
+                            val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as DownloadManager
+                            scope.launch(Dispatchers.IO) {
+                                var done = false
+                                while (!done) {
+                                    delay(1500)
+                                    val query = DownloadManager.Query().setFilterById(downloadId)
+                                    dm.query(query)?.use { cursor ->
+                                        if (cursor.moveToFirst()) {
+                                            when (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
+                                                DownloadManager.STATUS_SUCCESSFUL -> {
+                                                    done = true
+                                                    withContext(Dispatchers.Main) {
+                                                        isDownloading = false
+                                                        updateInfo = null
+                                                        installDownloadedApk(context)
+                                                    }
+                                                }
+                                                DownloadManager.STATUS_FAILED -> {
+                                                    done = true
+                                                    withContext(Dispatchers.Main) {
+                                                        isDownloading = false
+                                                        Toast.makeText(context, "Falha ao baixar atualização", Toast.LENGTH_LONG).show()
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D7DD2))
+                    ) {
+                        Text("Atualizar")
+                    }
+                }
+            },
+            dismissButton = {
+                if (!isDownloading) {
+                    TextButton(onClick = { updateInfo = null }) {
+                        Text("Agora não", color = Color(0xFF6B7A99))
+                    }
+                }
+            }
+        )
+    }
+    // ── fim auto-update ──────────────────────────────────────────
+
+    Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFEEF0F5)) {
+        NavHost(navController = navController, startDestination = "main") {
+            composable("main") {
+                when (selectedTab) {
+                    0 -> ReportListScreen(navController, viewModel, onNewReport = { selectedTab = 1 })
+                    1 -> NewReportScreen(navController, viewModel, { selectedTab = it })
+                }
+            }
+            composable("edit_report/{reportId}") { backStackEntry ->
+                val reportId = backStackEntry.arguments?.getString("reportId") ?: ""
+                EditReportScreen(navController, viewModel, reportId)
             }
         }
     }
@@ -262,16 +389,19 @@ fun MainScreen() {
 fun ReportListScreen(
     navController: androidx.navigation.NavController,
     viewModel: ReportViewModel,
-    searchQuery: String
+    onNewReport: () -> Unit
 ) {
     val reports by viewModel.reports.collectAsState()
     val context = LocalContext.current
+    var searchQuery by remember { mutableStateOf("") }
     var selectedBairro by remember { mutableStateOf("") }
     var expandedBairro by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var reportToDelete by remember { mutableStateOf<Report?>(null) }
-    
+    var sortOrder by remember { mutableStateOf(SortOrder.DATA_DESC) }
+    var expandedSort by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         try {
             viewModel.loadReports()
@@ -282,299 +412,446 @@ fun ReportListScreen(
             isLoading = false
         }
     }
-    
+
     if (showDeleteDialog) {
         AlertDialog(
-            onDismissRequest = { 
-                showDeleteDialog = false
-                reportToDelete = null
-            },
-            title = { 
-                Text(
-                    "Confirmar Exclusão",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-            },
-            text = { 
-                Text(
-                    "Tem certeza que deseja excluir o relatório de ${reportToDelete?.nomeEdificio}?",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            },
+            onDismissRequest = { showDeleteDialog = false; reportToDelete = null },
+            containerColor = Color.White,
+            titleContentColor = Color(0xFF1A2B4A),
+            textContentColor = Color(0xFF4A5568),
+            title = { Text("Confirmar Exclusão", fontWeight = FontWeight.Bold) },
+            text = { Text("Tem certeza que deseja excluir o relatório de ${reportToDelete?.nomeEdificio}?") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        reportToDelete?.let { report ->
-                            viewModel.deleteReport(report.id)
-                            Toast.makeText(context, "Relatório excluído com sucesso", Toast.LENGTH_SHORT).show()
-                        }
-                        showDeleteDialog = false
-                        reportToDelete = null
-                    }
-                ) {
-                    Text(
-                        "Excluir",
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    )
-                }
+                TextButton(onClick = {
+                    reportToDelete?.let { viewModel.deleteReport(it.id) }
+                    showDeleteDialog = false; reportToDelete = null
+                }) { Text("Excluir", color = Color(0xFFC0392B)) }
             },
             dismissButton = {
-                TextButton(
-                    onClick = { 
-                        showDeleteDialog = false
-                        reportToDelete = null
-                    }
-                ) {
-                    Text(
-                        "Cancelar",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
+                TextButton(onClick = { showDeleteDialog = false; reportToDelete = null }) {
+                    Text("Cancelar", color = Color(0xFF6B7A99))
                 }
             }
         )
     }
-    
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        if (isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+
+    val filteredReports = reports.filter { report ->
+        val matchesSearch = searchQuery.isBlank() ||
+            report.nomeEdificio.contains(searchQuery, ignoreCase = true) ||
+            report.endereco.contains(searchQuery, ignoreCase = true)
+        val bairro = report.endereco.split(",").getOrNull(1)?.trim() ?: ""
+        val matchesBairro = selectedBairro.isBlank() || bairro.equals(selectedBairro, ignoreCase = true)
+        matchesSearch && matchesBairro
+    }.let { list ->
+        when (sortOrder) {
+            SortOrder.DATA_DESC -> list.sortedByDescending { it.date }
+            SortOrder.DATA_ASC  -> list.sortedBy { it.date }
+            SortOrder.NOME      -> list.sortedBy { it.nomeEdificio.lowercase() }
+            SortOrder.BAIRRO    -> list.sortedBy { it.endereco.split(",").getOrNull(1)?.trim()?.lowercase() ?: "" }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        // ── Header navy ────────────────────────────────────────────
+        Column(
+            modifier = Modifier
+                .background(Color(0xFF1A2B4A))
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                CircularProgressIndicator()
+                Image(
+                    painter = painterResource(id = R.drawable.logo_myconnect),
+                    contentDescription = "Logo MY CONNECT",
+                    modifier = Modifier
+                        .width(120.dp)
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White)
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    contentScale = ContentScale.Fit
+                )
+                Button(
+                    onClick = onNewReport,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D7DD2)),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Nova", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
             }
-        } else {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { /* A mudança é gerenciada pelo componente pai */ },
-                label = { Text("Pesquisar", color = Color.White) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Pesquisar", tint = Color.White) },
+            Spacer(modifier = Modifier.height(12.dp))
+            // Barra de pesquisa
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.6f),
-                    focusedBorderColor = Color.White,
-                    cursorColor = Color.White
+                    .background(Color(0xFF243556), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF90A4BE), modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                TextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Pesquisar", color = Color(0xFF90A4BE), fontSize = 13.sp) },
+                    colors = TextFieldDefaults.colors(
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedTextColor = Color.White,
+                        focusedTextColor = Color.White,
+                        cursorColor = Color.White
+                    ),
+                    textStyle = ComposeTextStyle(fontSize = 13.sp),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
-            )
-            
-            // Lista de relatórios
-            LazyColumn(
+            }
+        }
+
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color(0xFF2D7DD2))
+            }
+        } else {
+            // ── Lista ──────────────────────────────────────────────
+            Column(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .background(Color(0xFFEEF0F5))
             ) {
-                if (reports.isEmpty()) {
-                    item {
-                        Surface(
-                            color = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "Nenhum relatório encontrado",
-                                style = MaterialTheme.typography.bodyLarge,
-                                modifier = Modifier.padding(16.dp)
-                            )
-                        }
+                val count = filteredReports.size
+                Text(
+                    text = "$count vistoria${if (count != 1) "s" else ""} encontrada${if (count != 1) "s" else ""}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF6B7A99),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+
+                if (filteredReports.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Nenhuma vistoria encontrada", color = Color(0xFF8896B0), fontSize = 14.sp)
                     }
                 } else {
-                    items(
-                        items = reports,
-                        key = { it.id }
-                    ) { report ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            color = Color(0xFF1722F8),
-                            shape = MaterialTheme.shapes.medium,
-                            shadowElevation = 6.dp
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                            ) {
-                                Text(
-                                    text = report.nomeEdificio,
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = Color.White,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    IconButton(onClick = {
-                                        reportToDelete = report
-                                        showDeleteDialog = true
-                                    }) {
-                                        Icon(
-                                            Icons.Default.Delete,
-                                            contentDescription = "Excluir",
-                                            tint = Color.White
-                                        )
-                                    }
-                                    IconButton(onClick = {
-                                        navController.navigate("edit_report/${report.id}")
-                                    }) {
-                                        Icon(
-                                            Icons.Default.Edit,
-                                            contentDescription = "Editar",
-                                            tint = Color.White
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = {
-                                            try {
-                                                generatePdf(context, report)
-                                            } catch (e: Exception) {
-                                                Toast.makeText(context, "Erro ao gerar PDF: ${e.message}", Toast.LENGTH_LONG).show()
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            Icons.Default.PictureAsPdf,
-                                            contentDescription = "Exportar PDF",
-                                            modifier = Modifier.size(24.dp),
-                                            tint = Color.White
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = {
-                                            try {
-                                                generateExcel(context, listOf(report))
-                                            } catch (e: Exception) {
-                                                Toast.makeText(context, "Erro ao gerar Excel: ${e.message}", Toast.LENGTH_LONG).show()
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            Icons.Default.TableChart,
-                                            contentDescription = "Exportar Excel",
-                                            modifier = Modifier.size(24.dp),
-                                            tint = Color.White
-                                        )
-                                    }
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(filteredReports, key = { it.id }) { report ->
+                            ReportCard(
+                                report = report,
+                                onEdit = { navController.navigate("edit_report/${report.id}") },
+                                onDelete = { reportToDelete = report; showDeleteDialog = true },
+                                onPdf = {
+                                    try { generatePdf(context, report) }
+                                    catch (e: Exception) { Toast.makeText(context, "Erro ao gerar PDF: ${e.message}", Toast.LENGTH_LONG).show() }
+                                },
+                                onExcel = {
+                                    try { generateExcel(context, listOf(report)) }
+                                    catch (e: Exception) { Toast.makeText(context, "Erro ao gerar Excel: ${e.message}", Toast.LENGTH_LONG).show() }
                                 }
-                            }
+                            )
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            HorizontalDivider(color = Color.White.copy(alpha = 0.2f), thickness = 1.dp)
-            Surface(
-                color = Color(0xFF1722F8),
-                modifier = Modifier.fillMaxWidth()
+            // ── Footer ─────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .background(Color.White)
+                    .padding(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                ExposedDropdownMenuBox(
+                    expanded = expandedBairro,
+                    onExpandedChange = { expandedBairro = it },
+                    modifier = Modifier.weight(1f)
                 ) {
-                    // Filtro por bairro
-                    ExposedDropdownMenuBox(
+                    OutlinedTextField(
+                        value = selectedBairro,
+                        onValueChange = {},
+                        readOnly = true,
+                        placeholder = { Text("Filtrar por bairro", fontSize = 12.sp, color = Color(0xFF6B7A99)) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedBairro) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedContainerColor = Color(0xFFF5F6FA),
+                            focusedContainerColor = Color(0xFFF5F6FA),
+                            unfocusedBorderColor = Color(0xFFC8D0E0),
+                            focusedBorderColor = Color(0xFF2D7DD2),
+                            unfocusedTextColor = Color(0xFF1A2B4A),
+                            focusedTextColor = Color(0xFF1A2B4A)
+                        ),
+                        textStyle = ComposeTextStyle(fontSize = 12.sp),
+                        singleLine = true
+                    )
+                    ExposedDropdownMenu(
                         expanded = expandedBairro,
-                        onExpandedChange = { expandedBairro = it },
-                        modifier = Modifier.weight(1f)
+                        onDismissRequest = { expandedBairro = false },
+                        modifier = Modifier.background(Color.White)
                     ) {
-                        OutlinedTextField(
-                            value = selectedBairro,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Filtrar por Bairro", color = Color.White) },
-                            trailingIcon = { 
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedBairro)
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(),
-                            shape = MaterialTheme.shapes.medium,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedTextColor = Color.White,
-                                focusedTextColor = Color.White,
-                                unfocusedBorderColor = Color.White,
-                                focusedBorderColor = Color.White
-                            )
+                        DropdownMenuItem(
+                            text = { Text("Todos os bairros", color = Color(0xFF1A2B4A), fontSize = 13.sp) },
+                            onClick = { selectedBairro = ""; expandedBairro = false }
                         )
-
-                        ExposedDropdownMenu(
-                            expanded = expandedBairro,
-                            onDismissRequest = { expandedBairro = false }
-                        ) {
+                        bairrosList.forEach { bairro ->
                             DropdownMenuItem(
-                                text = { Text("Todos os Bairros") },
-                                onClick = {
-                                    selectedBairro = ""
-                                    expandedBairro = false
-                                }
+                                text = { Text(bairro, color = Color(0xFF1A2B4A), fontSize = 13.sp) },
+                                onClick = { selectedBairro = bairro; expandedBairro = false }
                             )
-                            bairrosList.forEach { item ->
-                                DropdownMenuItem(
-                                    text = { Text(item) },
-                                    onClick = {
-                                        selectedBairro = item
-                                        expandedBairro = false
-                                    }
-                                )
-                            }
                         }
                     }
-
-                    // Botão de exportar Excel
-                    IconButton(
-                        onClick = {
-                            try {
-                                // Filtrar os relatórios pelo bairro selecionado antes de exportar
-                                val filteredReports = if (selectedBairro.isNullOrBlank()) {
-                                    reports
-                                } else {
-                                    reports.filter { report ->
-                                        // Extrai bairro do endereço
-                                        val enderecoParts = report.endereco.split(",")
-                                        val bairro = if (enderecoParts.size > 1) enderecoParts[1].trim() else ""
-                                        bairro.equals(selectedBairro, ignoreCase = true)
-                                    }
-                                }
-                                generateExcel(context, filteredReports)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Erro ao gerar Excel: ${e.message}", Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        modifier = Modifier.padding(start = 8.dp)
+                }
+                Box {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(
+                                if (sortOrder != SortOrder.DATA_DESC) Color(0xFFEEF3FB) else Color(0xFFF5F6FA),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .clickable { expandedSort = true },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Default.TableChart,
-                            contentDescription = "Exportar Excel",
-                            modifier = Modifier.size(24.dp),
-                            tint = Color.White
+                            Icons.Default.Sort,
+                            contentDescription = "Ordenar",
+                            tint = if (sortOrder != SortOrder.DATA_DESC) Color(0xFF2D7DD2) else Color(0xFF6B7A99),
+                            modifier = Modifier.size(18.dp)
                         )
                     }
+                    DropdownMenu(
+                        expanded = expandedSort,
+                        onDismissRequest = { expandedSort = false },
+                        modifier = Modifier.background(Color.White)
+                    ) {
+                        SortOrder.values().forEach { order ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        if (sortOrder == order)
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF2D7DD2), modifier = Modifier.size(14.dp))
+                                        else
+                                            Spacer(modifier = Modifier.width(14.dp))
+                                        Text(order.label, color = Color(0xFF1A2B4A), fontSize = 13.sp)
+                                    }
+                                },
+                                onClick = { sortOrder = order; expandedSort = false }
+                            )
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Color(0xFFF5F6FA), RoundedCornerShape(8.dp))
+                        .clickable {
+                            try { generateExcel(context, filteredReports) }
+                            catch (e: Exception) { Toast.makeText(context, "Erro ao gerar Excel: ${e.message}", Toast.LENGTH_LONG).show() }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.TableChart, contentDescription = "Exportar Excel", tint = Color(0xFF1E7E45), modifier = Modifier.size(18.dp))
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun ReportCard(
+    report: Report,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onPdf: () -> Unit,
+    onExcel: () -> Unit
+) {
+    val dateFormat = remember { SimpleDateFormat("d MMM yyyy", Locale("pt", "BR")) }
+    val bairro = report.endereco.split(",").getOrNull(1)?.trim() ?: ""
+    val dateStr = remember(report.date) { dateFormat.format(report.date) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(0.5.dp, Color(0xFFD5DAE6)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        // Linha principal: ícone + nome + bairro/data
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(Color(0xFFEEF3FB), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Apartment, contentDescription = null, tint = Color(0xFF2D7DD2), modifier = Modifier.size(18.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = report.nomeEdificio,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF1A2B4A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (report.aprovado != null) {
+                        val badgeBg = if (report.aprovado == true) Color(0xFFE8F5EE) else Color(0xFFFDF0EE)
+                        val badgeText = if (report.aprovado == true) "Aprovado" else "Reprovado"
+                        val badgeColor = if (report.aprovado == true) Color(0xFF1E7E45) else Color(0xFFC0392B)
+                        Box(
+                            modifier = Modifier
+                                .background(badgeBg, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Text(badgeText, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = badgeColor)
+                        }
+                    }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFF8896B0), modifier = Modifier.size(11.dp))
+                    Text(
+                        text = buildString {
+                            if (bairro.isNotEmpty()) { append(bairro); append(" · ") }
+                            append(dateStr)
+                        },
+                        fontSize = 11.sp,
+                        color = Color(0xFF8896B0)
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(color = Color(0xFFE8ECF4), thickness = 0.5.dp)
+
+        // Barra de ações
+        Row(modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            CardActionButton(
+                label = "Editar",
+                icon = Icons.Default.Edit,
+                iconBg = Color(0xFFEEF3FB),
+                iconTint = Color(0xFF2D7DD2),
+                labelColor = Color(0xFF2D7DD2),
+                modifier = Modifier.weight(1f),
+                onClick = onEdit
+            )
+            Box(modifier = Modifier.width(0.5.dp).fillMaxHeight().background(Color(0xFFE8ECF4)))
+            CardActionButton(
+                label = "PDF",
+                icon = Icons.Default.PictureAsPdf,
+                iconBg = Color(0xFFFDF0EE),
+                iconTint = Color(0xFFC0392B),
+                labelColor = Color(0xFFC0392B),
+                modifier = Modifier.weight(1f),
+                onClick = onPdf
+            )
+            Box(modifier = Modifier.width(0.5.dp).fillMaxHeight().background(Color(0xFFE8ECF4)))
+            CardActionButton(
+                label = "Excel",
+                icon = Icons.Default.TableChart,
+                iconBg = Color(0xFFEEF8F1),
+                iconTint = Color(0xFF1E7E45),
+                labelColor = Color(0xFF1E7E45),
+                modifier = Modifier.weight(1f),
+                onClick = onExcel
+            )
+            Box(modifier = Modifier.width(0.5.dp).fillMaxHeight().background(Color(0xFFE8ECF4)))
+            Box(
+                modifier = Modifier
+                    .width(44.dp)
+                    .fillMaxHeight()
+                    .clickable(onClick = onDelete),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .background(Color(0xFFF5F6FA), RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Excluir", tint = Color(0xFFAAB4C8), modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CardActionButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconBg: Color,
+    iconTint: Color,
+    labelColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(26.dp)
+                .background(iconBg, RoundedCornerShape(6.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = label, tint = iconTint, modifier = Modifier.size(14.dp))
+        }
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(label, fontSize = 10.sp, fontWeight = FontWeight.Medium, color = labelColor)
+    }
+}
+
+@Composable
+fun FormSection(title: String, content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(0.5.dp, Color(0xFFD5DAE6)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF1A2B4A)
+            )
+            HorizontalDivider(color = Color(0xFFE8ECF4), thickness = 0.5.dp)
+            content()
         }
     }
 }
@@ -671,43 +948,19 @@ fun ReportItem(
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { 
-                Text(
-                    "Confirmar Exclusão",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-            },
-            text = { 
-                Text(
-                    "Tem certeza que deseja excluir o relatório de ${report.nomeEdificio}?",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            },
+            containerColor = Color.White,
+            titleContentColor = Color(0xFF1A2B4A),
+            textContentColor = Color(0xFF4A5568),
+            title = { Text("Confirmar Exclusão", fontWeight = FontWeight.Bold) },
+            text = { Text("Tem certeza que deseja excluir o relatório de ${report.nomeEdificio}?") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        onDelete()
-                        showDeleteDialog = false
-                    }
-                ) {
-                    Text(
-                        "Excluir",
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    )
+                TextButton(onClick = { onDelete(); showDeleteDialog = false }) {
+                    Text("Excluir", color = Color(0xFFC0392B), fontWeight = FontWeight.SemiBold)
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = { showDeleteDialog = false }
-                ) {
-                    Text(
-                        "Cancelar",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancelar", color = Color(0xFF6B7A99))
                 }
             }
         )
@@ -734,6 +987,8 @@ fun NewReportScreen(
     var responsavelNome by remember { mutableStateOf("") }
     var responsavelVistoriaNome by remember { mutableStateOf("") }
     var nomesProvedores by remember { mutableStateOf<List<String>>(emptyList()) }
+    var vagasOcupadasProvedores by remember { mutableStateOf<List<String>>(emptyList()) }
+    var andaresProvedores by remember { mutableStateOf<List<String>>(emptyList()) }
     var condicaoShaft by remember { mutableStateOf("") }
     var meioEntrada by remember { mutableStateOf("Aéreo") }
     var tipoInstalacao by remember { mutableStateOf("CTO") }
@@ -745,21 +1000,46 @@ fun NewReportScreen(
     val createdReport = reports.find { it.id == createdReportId }
     val shaftPhotosList = createdReport?.fotosShaft ?: emptyList()
     var responsavelTelefone by remember { mutableStateOf("") }
+    var aprovado by remember { mutableStateOf<Boolean?>(null) }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var bairro by remember { mutableStateOf("") }
+    var cep by remember { mutableStateOf("") }
+    var isLoadingCep by remember { mutableStateOf(false) }
+    var cepError by remember { mutableStateOf("") }
+    var cidadeUf by remember { mutableStateOf("") }
     var expandedBairro by remember { mutableStateOf(false) }
     var expandedAndares by remember { mutableStateOf(false) }
     var expandedAptos by remember { mutableStateOf(false) }
     var expandedProvedores by remember { mutableStateOf(false) }
     var expandedAndaresSelecionados by remember { mutableStateOf(false) }
     var andaresSelecionados by remember { mutableStateOf(setOf<Int>()) }
-    
+
     val context = LocalContext.current
     val andaresArray = context.resources.getStringArray(R.array.numero_andares)
     val aptosArray = context.resources.getStringArray(R.array.apartamentos_por_andar)
     val provedoresArray = context.resources.getStringArray(R.array.numero_provedores)
-    
+
+    LaunchedEffect(cep) {
+        if (cep.length == 8) {
+            isLoadingCep = true
+            cepError = ""
+            val result = fetchViaCep(cep)
+            isLoadingCep = false
+            if (result != null) {
+                endereco = result.logradouro
+                bairro = result.bairro
+                cidadeUf = "${result.localidade} - ${result.uf}"
+            } else {
+                cepError = "CEP não encontrado"
+                cidadeUf = ""
+            }
+        } else {
+            cidadeUf = ""
+            cepError = ""
+        }
+    }
+
     // Atualiza o nome do relatório quando o nome do edifício muda
     LaunchedEffect(nomeEdificio) {
         nome = if (nomeEdificio.isNotEmpty()) {
@@ -890,10 +1170,13 @@ fun NewReportScreen(
     if (showGeneralPhotoDialog) {
         AlertDialog(
             onDismissRequest = { showGeneralPhotoDialog = false },
-            title = { Text("Selecionar foto") },
+            containerColor = Color.White,
+            titleContentColor = Color(0xFF1A2B4A),
+            textContentColor = Color(0xFF4A5568),
+            title = { Text("Selecionar foto", fontWeight = FontWeight.SemiBold) },
             text = {
                 Column {
-                    Text("Escolha a origem da foto:", modifier = Modifier.padding(bottom = 16.dp))
+                    Text("Escolha a origem da foto:", modifier = Modifier.padding(bottom = 8.dp), color = Color(0xFF4A5568))
                     TextButton(onClick = {
                         val photoFile = File(context.cacheDir, "camera_photo_general_${System.currentTimeMillis()}.jpg")
                         cameraGeneralImageUri = androidx.core.content.FileProvider.getUriForFile(
@@ -903,860 +1186,399 @@ fun NewReportScreen(
                         )
                         takeGeneralPictureLauncher.launch(cameraGeneralImageUri)
                         showGeneralPhotoDialog = false
-                    }) { Text("Câmera") }
+                    }) { Text("Câmera", color = Color(0xFF2D7DD2)) }
                     TextButton(onClick = {
                         pickGeneralPhotoLauncher.launch("image/*")
                         showGeneralPhotoDialog = false
-                    }) { Text("Galeria") }
-                    // Opcional: Adicionar um botão de Cancelar
-                    TextButton(onClick = { showGeneralPhotoDialog = false }) { Text("Cancelar") }
+                    }) { Text("Galeria", color = Color(0xFF2D7DD2)) }
+                    TextButton(onClick = { showGeneralPhotoDialog = false }) { Text("Cancelar", color = Color(0xFF6B7A99)) }
                 }
             },
-            // Remove confirmButton e dismissButton slots que estavam sendo usados incorretamente
             confirmButton = {},
             dismissButton = {}
         )
     }
 
     // Diálogo de escolha de origem da foto do shaft
-     if (showShaftPhotoDialog) {
+    if (showShaftPhotoDialog) {
         AlertDialog(
             onDismissRequest = { showShaftPhotoDialog = false },
-            title = { Text("Selecionar foto do Shaft") },
+            containerColor = Color.White,
+            titleContentColor = Color(0xFF1A2B4A),
+            textContentColor = Color(0xFF4A5568),
+            title = { Text("Selecionar foto do Shaft", fontWeight = FontWeight.SemiBold) },
             text = {
-                 Column {
-                    Text("Escolha a origem da foto:", modifier = Modifier.padding(bottom = 16.dp))
+                Column {
+                    Text("Escolha a origem da foto:", modifier = Modifier.padding(bottom = 8.dp), color = Color(0xFF4A5568))
                     TextButton(onClick = {
-                         val photoFile = File(context.cacheDir, "camera_photo_shaft_${System.currentTimeMillis()}.jpg")
-                         cameraShaftImageUri = androidx.core.content.FileProvider.getUriForFile(
-                             context,
-                             context.packageName + ".provider",
-                             photoFile
-                         )
+                        val photoFile = File(context.cacheDir, "camera_photo_shaft_${System.currentTimeMillis()}.jpg")
+                        cameraShaftImageUri = androidx.core.content.FileProvider.getUriForFile(
+                            context,
+                            context.packageName + ".provider",
+                            photoFile
+                        )
                         takeShaftPictureLauncher.launch(cameraShaftImageUri)
                         showShaftPhotoDialog = false
-                    }) { Text("Câmera") }
+                    }) { Text("Câmera", color = Color(0xFF2D7DD2)) }
                     TextButton(onClick = {
                         pickShaftPhotoLauncher.launch("image/*")
                         showShaftPhotoDialog = false
-                    }) { Text("Galeria") }
-                     // Opcional: Adicionar um botão de Cancelar
-                    TextButton(onClick = { showShaftPhotoDialog = false }) { Text("Cancelar") }
+                    }) { Text("Galeria", color = Color(0xFF2D7DD2)) }
+                    TextButton(onClick = { showShaftPhotoDialog = false }) { Text("Cancelar", color = Color(0xFF6B7A99)) }
                 }
             },
-            // Remove confirmButton e dismissButton slots que estavam sendo usados incorretamente
             confirmButton = {},
             dismissButton = {}
         )
     }
 
-    if (showError) {
-        LaunchedEffect(showError) {
-            showError = false
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        unfocusedContainerColor = Color(0xFFF5F6FA),
+        focusedContainerColor  = Color(0xFFF5F6FA),
+        unfocusedBorderColor   = Color(0xFFC8D0E0),
+        focusedBorderColor     = Color(0xFF2D7DD2),
+        unfocusedTextColor     = Color(0xFF1A2B4A),
+        focusedTextColor       = Color(0xFF1A2B4A),
+        unfocusedLabelColor    = Color(0xFF6B7A99),
+        focusedLabelColor      = Color(0xFF2D7DD2),
+        cursorColor            = Color(0xFF2D7DD2),
+        disabledContainerColor = Color(0xFFF5F6FA),
+        disabledBorderColor    = Color(0xFFE8ECF4),
+        disabledTextColor      = Color(0xFF8896B0)
+    )
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFEEF0F5))) {
+
+        // Header navy
+        Row(
+            modifier = Modifier
+                .background(Color(0xFF1A2B4A))
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { onTabChange(0) }) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Voltar", tint = Color.White)
+            }
+            Text("Novo Relatório", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Color.White)
+            Spacer(modifier = Modifier.weight(1f))
+            Image(
+                painter = painterResource(id = R.drawable.logo_myconnect),
+                contentDescription = "Logo MY CONNECT",
+                modifier = Modifier
+                    .width(100.dp)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White)
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                contentScale = ContentScale.Fit
+            )
+            Spacer(modifier = Modifier.width(4.dp))
         }
-        Snackbar(
-            modifier = Modifier.padding(16.dp),
-            action = {
-                TextButton(onClick = { showError = false }) {
-                    Text("OK")
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (showError) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFDF0EE)),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(0.5.dp, Color(0xFFC0392B))
+                ) {
+                    Text(errorMessage, color = Color(0xFFC0392B), modifier = Modifier.padding(12.dp), fontSize = 13.sp)
+                }
+                LaunchedEffect(showError) { showError = false }
+            }
+
+            // ── Responsável pela Vistoria ───────────────────────────
+            FormSection("Responsável pela Vistoria") {
+                OutlinedTextField(
+                    value = responsavelVistoriaNome, onValueChange = { responsavelVistoriaNome = it },
+                    label = { Text("Nome do responsável") },
+                    modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true
+                )
+            }
+
+            // ── Endereço ────────────────────────────────────────────
+            FormSection("Endereço") {
+                OutlinedTextField(
+                    value = cep,
+                    onValueChange = { newVal -> val digits = newVal.filter { it.isDigit() }; if (digits.length <= 8) cep = digits },
+                    label = { Text("CEP") },
+                    placeholder = { Text("00000-000", color = Color(0xFFAAB4C8)) },
+                    visualTransformation = CepVisualTransformation(),
+                    trailingIcon = { if (isLoadingCep) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF2D7DD2), strokeWidth = 2.dp) },
+                    isError = cepError.isNotEmpty(),
+                    supportingText = { when { cepError.isNotEmpty() -> Text(cepError, color = MaterialTheme.colorScheme.error); cidadeUf.isNotEmpty() -> Text(cidadeUf, color = Color(0xFF6B7A99)) } },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), colors = fieldColors
+                )
+                OutlinedTextField(
+                    value = nomeEdificio, onValueChange = { nomeEdificio = it },
+                    label = { Text("Nome do Edifício") },
+                    modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true
+                )
+                OutlinedTextField(
+                    value = endereco, onValueChange = { endereco = it },
+                    label = { Text("Rua, Número") },
+                    modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true
+                )
+                ExposedDropdownMenuBox(expanded = expandedBairro, onExpandedChange = { expandedBairro = it }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = bairro, onValueChange = {}, readOnly = true,
+                        label = { Text("Bairro") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedBairro) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors
+                    )
+                    ExposedDropdownMenu(expanded = expandedBairro, onDismissRequest = { expandedBairro = false }, modifier = Modifier.background(Color.White)) {
+                        bairrosList.forEach { item -> DropdownMenuItem(text = { Text(item, color = Color(0xFF1A2B4A)) }, onClick = { bairro = item; expandedBairro = false }) }
+                    }
+                }
+                if (nome.isNotEmpty()) {
+                    OutlinedTextField(
+                        value = nome, onValueChange = {}, enabled = false,
+                        label = { Text("Nome do Relatório") },
+                        modifier = Modifier.fillMaxWidth(), colors = fieldColors
+                    )
                 }
             }
-        ) {
-            Text(errorMessage)
+
+            // ── Informações do Edifício ─────────────────────────────
+            FormSection("Informações do Edifício") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ExposedDropdownMenuBox(expanded = expandedAndares, onExpandedChange = { expandedAndares = it }, modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(value = andares, onValueChange = {}, readOnly = true, label = { Text("Andares") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAndares) }, modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors)
+                        ExposedDropdownMenu(expanded = expandedAndares, onDismissRequest = { expandedAndares = false }, modifier = Modifier.background(Color.White)) {
+                            andaresArray.forEach { item -> DropdownMenuItem(text = { Text(item, color = Color(0xFF1A2B4A)) }, onClick = { andares = item; expandedAndares = false }) }
+                        }
+                    }
+                    ExposedDropdownMenuBox(expanded = expandedAptos, onExpandedChange = { expandedAptos = it }, modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(value = apartamentosPorAndar, onValueChange = {}, readOnly = true, label = { Text("Aptos/Andar") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAptos) }, modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors)
+                        ExposedDropdownMenu(expanded = expandedAptos, onDismissRequest = { expandedAptos = false }, modifier = Modifier.background(Color.White)) {
+                            aptosArray.forEach { item -> DropdownMenuItem(text = { Text(item, color = Color(0xFF1A2B4A)) }, onClick = { apartamentosPorAndar = item; expandedAptos = false }) }
+                        }
+                    }
+                }
+                OutlinedTextField(value = quantidadeBlocos, onValueChange = { quantidadeBlocos = it }, label = { Text("Quantidade de Blocos") }, modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true)
+                ExposedDropdownMenuBox(expanded = expandedAndaresSelecionados, onExpandedChange = { expandedAndaresSelecionados = it }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = if (andaresSelecionados.isEmpty()) "" else andaresSelecionados.sorted().joinToString(", "),
+                        onValueChange = {}, readOnly = true,
+                        label = { Text("Andares para instalação CTO/Modular") },
+                        placeholder = { Text("Selecione os andares", color = Color(0xFFAAB4C8)) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAndaresSelecionados) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors
+                    )
+                    ExposedDropdownMenu(expanded = expandedAndaresSelecionados, onDismissRequest = { expandedAndaresSelecionados = false }, modifier = Modifier.background(Color.White)) {
+                        Box(modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
+                            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                                val totalAndaresInt = andares.toIntOrNull() ?: 0
+                                if (totalAndaresInt > 0) {
+                                    for (andar in 1..totalAndaresInt) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth()
+                                                .clickable { andaresSelecionados = if (andaresSelecionados.contains(andar)) andaresSelecionados.minus(andar) else andaresSelecionados.plus(andar) }
+                                                .padding(vertical = 8.dp, horizontal = 16.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Checkbox(checked = andaresSelecionados.contains(andar), onCheckedChange = null, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF2D7DD2), uncheckedColor = Color(0xFF6B7A99)))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Andar $andar", style = MaterialTheme.typography.bodyLarge, color = Color(0xFF1A2B4A))
+                                        }
+                                    }
+                                } else {
+                                    Text("Selecione o número de andares primeiro", modifier = Modifier.padding(16.dp), color = Color(0xFF6B7A99))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Infraestrutura ──────────────────────────────────────
+            FormSection("Infraestrutura") {
+                ExposedDropdownMenuBox(expanded = expandedProvedores, onExpandedChange = { expandedProvedores = it }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(value = provedores, onValueChange = {}, readOnly = true, label = { Text("Número de Provedores") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedProvedores) }, modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors)
+                    ExposedDropdownMenu(expanded = expandedProvedores, onDismissRequest = { expandedProvedores = false }, modifier = Modifier.background(Color.White)) {
+                        provedoresArray.forEach { item -> DropdownMenuItem(text = { Text(item, color = Color(0xFF1A2B4A)) }, onClick = {
+                            val n = item.toInt()
+                            provedores = item
+                            nomesProvedores = List(n) { "" }
+                            vagasOcupadasProvedores = List(n) { "" }
+                            andaresProvedores = List(n) { "" }
+                            expandedProvedores = false
+                        }) }
+                    }
+                }
+                if (provedores.isNotEmpty() && (provedores.toIntOrNull() ?: 0) > 0) {
+                    repeat(provedores.toInt()) { index ->
+                        if (index > 0) HorizontalDivider(color = Color(0xFFE8ECF4), modifier = Modifier.padding(vertical = 4.dp))
+                        Text("Provedor ${index + 1}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF6B7A99))
+                        OutlinedTextField(
+                            value = nomesProvedores.getOrNull(index) ?: "",
+                            onValueChange = { v -> val l = nomesProvedores.toMutableList(); if (index < l.size) l[index] = v else l.add(v); nomesProvedores = l },
+                            label = { Text("Nome") },
+                            modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true
+                        )
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = vagasOcupadasProvedores.getOrNull(index) ?: "",
+                                onValueChange = { v -> val l = vagasOcupadasProvedores.toMutableList(); if (index < l.size) l[index] = v else l.add(v); vagasOcupadasProvedores = l },
+                                label = { Text("Vagas ocupadas") },
+                                modifier = Modifier.weight(1f), colors = fieldColors, singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                            OutlinedTextField(
+                                value = andaresProvedores.getOrNull(index) ?: "",
+                                onValueChange = { v -> val l = andaresProvedores.toMutableList(); if (index < l.size) l[index] = v else l.add(v); andaresProvedores = l },
+                                label = { Text("Andares das caixas") },
+                                modifier = Modifier.weight(1f), colors = fieldColors, singleLine = true
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(value = condicaoShaft, onValueChange = { condicaoShaft = it }, label = { Text("Condições do Shaft") }, modifier = Modifier.fillMaxWidth(), minLines = 3, colors = fieldColors)
+                OutlinedButton(onClick = { showShaftPhotoDialog = true }, modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, Color(0xFF2D7DD2)), shape = RoundedCornerShape(8.dp)) {
+                    Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF2D7DD2), modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Adicionar Fotos do Shaft", color = Color(0xFF2D7DD2))
+                }
+                if (shaftPhotos.isNotEmpty()) {
+                    LazyRow(modifier = Modifier.fillMaxWidth().height(90.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(shaftPhotos) { photoUrl ->
+                            Image(painter = rememberAsyncImagePainter(photoUrl), contentDescription = null, modifier = Modifier.size(90.dp).clip(RoundedCornerShape(8.dp)).clickable { selectedPhotoUrl = photoUrl }, contentScale = ContentScale.Crop)
+                        }
+                    }
+                }
+                OutlinedTextField(value = observacoesGerais, onValueChange = { observacoesGerais = it }, label = { Text("Observações Gerais") }, modifier = Modifier.fillMaxWidth(), minLines = 3, colors = fieldColors)
+            }
+
+            // ── Meio de Entrada ─────────────────────────────────────
+            FormSection("Meio de Entrada") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    listOf("Aéreo", "Subterrâneo").forEach { option ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { meioEntrada = option }) {
+                            RadioButton(selected = meioEntrada == option, onClick = { meioEntrada = option }, colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF2D7DD2), unselectedColor = Color(0xFF6B7A99)))
+                            Text(option, color = Color(0xFF1A2B4A), fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+
+            // ── Tipo de Instalação ──────────────────────────────────
+            FormSection("Tipo de Instalação") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    listOf("CTO", "Modular").forEach { option ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { tipoInstalacao = option }) {
+                            RadioButton(selected = tipoInstalacao == option, onClick = { tipoInstalacao = option }, colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF2D7DD2), unselectedColor = Color(0xFF6B7A99)))
+                            Text(option, color = Color(0xFF1A2B4A), fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+
+            // ── Responsável ─────────────────────────────────────────
+            FormSection("Responsável") {
+                OutlinedTextField(value = responsavelNome, onValueChange = { responsavelNome = it }, label = { Text("Nome do responsável") }, modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true)
+                OutlinedTextField(
+                    value = responsavelTelefone,
+                    onValueChange = { newValue -> val numbers = newValue.filter { it.isDigit() }; if (numbers.length <= 11) responsavelTelefone = numbers },
+                    label = { Text("Telefone") }, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done),
+                    placeholder = { Text("00000000000", color = Color(0xFFAAB4C8)) },
+                    colors = fieldColors, singleLine = true
+                )
+            }
+
+            // ── Resultado da Vistoria ───────────────────────────────
+            FormSection("Resultado da Vistoria") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    listOf(true to "Aprovado", false to "Reprovado").forEach { (valor, label) ->
+                        val selected = aprovado == valor
+                        val bgColor = when { selected && valor -> Color(0xFF1E7E45); selected && !valor -> Color(0xFFC0392B); else -> Color(0xFFF5F6FA) }
+                        val textColor = if (selected) Color.White else Color(0xFF6B7A99)
+                        val borderColor = when { selected && valor -> Color(0xFF1E7E45); selected && !valor -> Color(0xFFC0392B); else -> Color(0xFFC8D0E0) }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(bgColor)
+                                .clickable { aprovado = if (aprovado == valor) null else valor }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = textColor)
+                        }
+                    }
+                }
+            }
+
+            // ── Salvar ──────────────────────────────────────────────
+            Button(
+                onClick = {
+                    try {
+                        if (nomeEdificio.isEmpty() || endereco.isEmpty() || bairro.isEmpty()) {
+                            errorMessage = "Por favor, preencha o nome do edifício, endereço e bairro"
+                            showError = true
+                            return@Button
+                        }
+                        val enderecoCompleto = "$endereco, $bairro"
+                        val newReport = Report(
+                            id = UUID.randomUUID().toString(),
+                            nome = nome,
+                            endereco = enderecoCompleto,
+                            nomeEdificio = nomeEdificio,
+                            andares = andares.toIntOrNull() ?: 0,
+                            andaresSelecionados = andaresSelecionados.toList(),
+                            apartamentosPorAndar = apartamentosPorAndar.toIntOrNull() ?: 0,
+                            provedores = provedores.toIntOrNull() ?: 0,
+                            nomesProvedores = nomesProvedores,
+                            vagasOcupadasProvedores = vagasOcupadasProvedores,
+                            andaresProvedores = andaresProvedores,
+                            condicaoShaft = condicaoShaft,
+                            fotosShaft = shaftPhotos,
+                            meioEntrada = meioEntrada,
+                            tipoInstalacao = tipoInstalacao,
+                            observacoesGerais = observacoesGerais,
+                            photos = photos,
+                            responsavelNome = responsavelNome,
+                            responsavelTelefone = responsavelTelefone,
+                            responsavelVistoriaNome = responsavelVistoriaNome,
+                            quantidadeBlocos = quantidadeBlocos,
+                            cep = cep,
+                            date = Date(),
+                            aprovado = aprovado
+                        )
+                        viewModel.addReport(newReport)
+                        viewModel.setCurrentReport(newReport.id)
+                        createdReportId = newReport.id
+                        Toast.makeText(context, "Relatório salvo com sucesso", Toast.LENGTH_SHORT).show()
+                        onTabChange(0)
+                        navController.popBackStack()
+                    } catch (e: Exception) {
+                        android.util.Log.e("NewReportScreen", "Error creating report: ${e.message}")
+                        errorMessage = "Erro ao criar relatório: ${e.message}"
+                        showError = true
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D7DD2)),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Salvar Relatório", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            }
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
-    
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Text(
-            text = "Novo Relatório",
-            style = MaterialTheme.typography.headlineLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(bottom = 16.dp),
-            color = Color.White
-        )
-        Spacer(modifier = Modifier.height(8.dp))
 
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(20.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Responsável Pela Vistoria",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
-        OutlinedTextField(
-            value = responsavelVistoriaNome,
-            onValueChange = { responsavelVistoriaNome = it },
-            label = { Text("Digite o nome do responsável pela vistoria", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Endereço",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
-        
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp)
-        ) {
-            OutlinedTextField(
-                value = nomeEdificio,
-                onValueChange = { nomeEdificio = it },
-                label = { Text("Nome do Edifício", color = Color.White) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White
-                )
-            )
-
-            OutlinedTextField(
-                value = endereco,
-                onValueChange = { endereco = it },
-                label = { Text("Rua, Número", color = Color.White) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White
-                )
-            )
-
-            ExposedDropdownMenuBox(
-                expanded = expandedBairro,
-                onExpandedChange = { expandedBairro = it },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = bairro,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Bairro", color = Color.White) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedBairro) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        unfocusedTextColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedBorderColor = Color.White,
-                        focusedBorderColor = Color.White
-                    )
-                )
-
-                ExposedDropdownMenu(
-                    expanded = expandedBairro,
-                    onDismissRequest = { expandedBairro = false }
-                ) {
-                    bairrosList.forEach { item ->
-                        DropdownMenuItem(
-                            text = { Text(item) },
-                            onClick = {
-                                bairro = item
-                                expandedBairro = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            OutlinedTextField(
-                value = nome,
-                onValueChange = { },
-                label = { Text("Nome do Relatório", color = Color.White) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                enabled = false,
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White
-                )
-            )
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Informações do Edifício",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Dropdown para número de andares
-            ExposedDropdownMenuBox(
-                expanded = expandedAndares,
-                onExpandedChange = { expandedAndares = it },
-                modifier = Modifier.weight(1f)
-            ) {
-                OutlinedTextField(
-                    value = andares,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Número de Andares", color = Color.White) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAndares) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        unfocusedTextColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedBorderColor = Color.White,
-                        focusedBorderColor = Color.White
-                    )
-                )
-
-                ExposedDropdownMenu(
-                    expanded = expandedAndares,
-                    onDismissRequest = { expandedAndares = false }
-                ) {
-                    andaresArray.forEach { item ->
-                        DropdownMenuItem(
-                            text = { Text(item) },
-                            onClick = {
-                                andares = item
-                                expandedAndares = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            // Dropdown para apartamentos por andar
-            ExposedDropdownMenuBox(
-                expanded = expandedAptos,
-                onExpandedChange = { expandedAptos = it },
-                modifier = Modifier.weight(1f)
-            ) {
-                OutlinedTextField(
-                    value = apartamentosPorAndar,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Aptos por Andar", color = Color.White) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAptos) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        unfocusedTextColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedBorderColor = Color.White,
-                        focusedBorderColor = Color.White
-                    )
-                )
-
-                ExposedDropdownMenu(
-                    expanded = expandedAptos,
-                    onDismissRequest = { expandedAptos = false }
-                ) {
-                    aptosArray.forEach { item ->
-                        DropdownMenuItem(
-                            text = { Text(item) },
-                            onClick = {
-                                apartamentosPorAndar = item
-                                expandedAptos = false
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Campo para quantidade de blocos
-        OutlinedTextField(
-            value = quantidadeBlocos,
-            onValueChange = { newValue ->
-                quantidadeBlocos = newValue
-            },
-            label = { Text("Quantidade de Blocos", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Infraestrutura",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
-
-        // Dropdown para número de provedores
-        ExposedDropdownMenuBox(
-            expanded = expandedProvedores,
-            onExpandedChange = { expandedProvedores = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
-        ) {
-            OutlinedTextField(
-                value = provedores,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Número de Provedores", color = Color.White) },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedProvedores) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .menuAnchor(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White
-                )
-            )
-
-            ExposedDropdownMenu(
-                expanded = expandedProvedores,
-                onDismissRequest = { expandedProvedores = false }
-            ) {
-                provedoresArray.forEach { item ->
-                    DropdownMenuItem(
-                        text = { Text(item) },
-                        onClick = {
-                            provedores = item
-                            // Inicializa a lista de nomes de provedores com strings vazias
-                            nomesProvedores = List(item.toInt()) { "" }
-                            expandedProvedores = false
-                        }
-                    )
-                }
-            }
-        }
-
-        // Campos para nomes dos provedores
-        if (provedores.isNotEmpty() && provedores.toIntOrNull() ?: 0 > 0) {
-            Text(
-                text = "Nomes dos Provedores",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(vertical = 8.dp),
-                color = Color.White
-            )
-            
-            Column {
-                repeat(provedores.toInt()) { index ->
-                    OutlinedTextField(
-                        value = nomesProvedores.getOrNull(index) ?: "",
-                        onValueChange = { newValue ->
-                            val newNomes = nomesProvedores.toMutableList()
-                            if (index < newNomes.size) {
-                                newNomes[index] = newValue
-                            } else {
-                                newNomes.add(newValue)
-                            }
-                            nomesProvedores = newNomes
-                        },
-                        label = { Text("Nome do Provedor ${index + 1}", color = Color.White) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                            focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White,
-                            focusedBorderColor = Color.White
-                        )
-                    )
-                }
-            }
-        }
-
-        OutlinedTextField(
-            value = condicaoShaft,
-            onValueChange = { condicaoShaft = it },
-            label = { Text("Condições do Shaft", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            minLines = 3,
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = observacoesGerais,
-            onValueChange = { observacoesGerais = it },
-            label = { Text("Observações Gerais", color = Color.White) },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Botão Adicionar Fotos do Shaft - Mantido aqui ou mover se necessário
-        Button(
-            onClick = { showShaftPhotoDialog = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp)
-        ) {
-            Text("Adicionar Fotos do Shaft")
-        }
-        if (shaftPhotos.isNotEmpty()) {
-            Text(
-                text = "Fotos do Shaft:",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = Color.White,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(100.dp)
-                    .padding(bottom = 8.dp)
-            ) {
-                items(shaftPhotos) { photoUrl ->
-                    Image(
-                        painter = rememberAsyncImagePainter(photoUrl),
-                        contentDescription = "Foto do shaft",
-                        modifier = Modifier
-                            .size(100.dp)
-                            .padding(end = 8.dp)
-                            .clickable { selectedPhotoUrl = photoUrl },
-                        contentScale = ContentScale.Crop
-                    )
-                }
-            }
-        }
-
-        // Campo para meio de entrada como RadioGroup
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
-        ) {
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-            Row(
-                modifier = Modifier.padding(bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Meio de Entrada do Condomínio",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = meioEntrada == "Aéreo",
-                        onClick = { meioEntrada = "Aéreo" },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = Color.White,
-                            unselectedColor = Color.White
-                        )
-                    )
-                    Text(
-                        text = "Aéreo",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(start = 4.dp),
-                        color = Color.White
-                    )
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = meioEntrada == "Subterrâneo",
-                        onClick = { meioEntrada = "Subterrâneo" },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = Color.White,
-                            unselectedColor = Color.White
-                        )
-                    )
-                    Text(
-                        text = "Subterrâneo",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(start = 4.dp),
-                        color = Color.White
-                    )
-                }
-            }
-        }
-
-        // Campo para tipo de instalação como RadioGroup
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
-        ) {
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-            Row(
-                modifier = Modifier.padding(bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Tipo de Instalação",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = tipoInstalacao == "CTO",
-                        onClick = { tipoInstalacao = "CTO" },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = Color.White,
-                            unselectedColor = Color.White
-                        )
-                    )
-                    Text(
-                        text = "CTO",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(start = 4.dp),
-                        color = Color.White
-                    )
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = tipoInstalacao == "Modular",
-                        onClick = { tipoInstalacao = "Modular" },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = Color.White,
-                            unselectedColor = Color.White
-                        )
-                    )
-                    Text(
-                        text = "Modular",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(start = 4.dp),
-                        color = Color.White
-                    )
-                }
-            }
-        }
-
-        // Seção de Possíveis Andares de Instalação
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp)
-        ) {
-            Text(
-                text = "Andares para Instalação da CTO ou Modular",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(bottom = 8.dp),
-                color = Color.White
-            )
-            
-            ExposedDropdownMenuBox(
-                expanded = expandedAndaresSelecionados,
-                onExpandedChange = { expandedAndaresSelecionados = it },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = if (andaresSelecionados.isEmpty()) "Selecione os andares" 
-                           else andaresSelecionados.sorted().joinToString(", "),
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Andares para Instalação da CTO ou Modular", color = Color.White) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAndaresSelecionados) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        unfocusedTextColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedBorderColor = Color.White,
-                        focusedBorderColor = Color.White
-                    ),
-                    textStyle = MaterialTheme.typography.titleMedium.copy(
-                        color = Color.White
-                    )
-                )
-
-                ExposedDropdownMenu(
-                    expanded = expandedAndaresSelecionados,
-                    onDismissRequest = { expandedAndaresSelecionados = false }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 200.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            val totalAndaresInt = andares.toIntOrNull() ?: 0
-                            if (totalAndaresInt > 0) {
-                                for (andar in 1..totalAndaresInt) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                andaresSelecionados = if (andaresSelecionados.contains(andar)) {
-                                                    andaresSelecionados.minus(andar)
-                                                } else {
-                                                    andaresSelecionados.plus(andar)
-                                                }
-                                            }
-                                            .padding(vertical = 8.dp, horizontal = 16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Checkbox(
-                                            checked = andaresSelecionados.contains(andar),
-                                            onCheckedChange = null
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Andar $andar",
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
-                                    }
-                                }
-                            } else {
-                                Text(
-                                    text = "Selecione o número de andares primeiro",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.padding(16.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Responsável",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
-        
-        OutlinedTextField(
-            value = responsavelNome,
-            onValueChange = { responsavelNome = it },
-            label = { Text("Nome do Responsável", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-
-        OutlinedTextField(
-            value = responsavelTelefone,
-            onValueChange = { newValue ->
-                val numbers = newValue.filter { it.isDigit() }
-                if (numbers.length <= 11) {
-                    responsavelTelefone = numbers
-                }
-            },
-            label = { Text("Telefone do Responsável", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Phone,
-                imeAction = ImeAction.Done
-            ),
-            placeholder = { Text("00000000000", color = Color.White.copy(alpha = 0.7f)) },
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-        
-        Button(
-            onClick = {
-                try {
-                    if (nomeEdificio.isEmpty() || endereco.isEmpty() || bairro.isEmpty()) {
-                        errorMessage = "Por favor, preencha o nome do edifício, endereço e bairro"
-                        showError = true
-                        return@Button
-                    }
-
-                    val enderecoCompleto = "$endereco, $bairro"
-                    val newReport = Report(
-                        id = UUID.randomUUID().toString(),
-                        nome = nome,
-                        endereco = enderecoCompleto,
-                        nomeEdificio = nomeEdificio,
-                        andares = andares.toIntOrNull() ?: 0,
-                        andaresSelecionados = andaresSelecionados.toList(),
-                        apartamentosPorAndar = apartamentosPorAndar.toIntOrNull() ?: 0,
-                        provedores = provedores.toIntOrNull() ?: 0,
-                        nomesProvedores = nomesProvedores,
-                        condicaoShaft = condicaoShaft,
-                        fotosShaft = shaftPhotos,
-                        meioEntrada = meioEntrada,
-                        tipoInstalacao = tipoInstalacao,
-                        observacoesGerais = observacoesGerais,
-                        photos = photos,
-                        responsavelNome = responsavelNome,
-                        responsavelTelefone = responsavelTelefone,
-                        responsavelVistoriaNome = responsavelVistoriaNome,
-                        quantidadeBlocos = quantidadeBlocos,
-                        date = Date()
-                    )
-                    
-                    viewModel.addReport(newReport)
-                    viewModel.setCurrentReport(newReport.id)
-                    createdReportId = newReport.id
-                    Toast.makeText(context, "Relatório salvo com sucesso", Toast.LENGTH_SHORT).show()
-                    // Voltar para a aba de relatórios
-                    onTabChange(0) // Muda para a aba de relatórios
-                    navController.popBackStack()
-                } catch (e: Exception) {
-                    android.util.Log.e("NewReportScreen", "Error creating report: ${e.message}")
-                    errorMessage = "Erro ao criar relatório: ${e.message}"
-                    showError = true
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp)
-        ) {
-            Text("Salvar Relatório")
+    selectedPhotoUrl?.let { url ->
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.9f)).clickable { selectedPhotoUrl = null }, contentAlignment = Alignment.Center) {
+            Image(painter = rememberAsyncImagePainter(url), contentDescription = null, modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
         }
     }
 }
@@ -1799,6 +1621,8 @@ fun EditReportScreen(
     var apartamentosPorAndar by remember { mutableStateOf((report.apartamentosPorAndar ?: 0).toString()) }
     var provedores by remember { mutableStateOf((report.provedores ?: 0).toString()) }
     var nomesProvedores by remember { mutableStateOf(report.nomesProvedores ?: emptyList()) }
+    var vagasOcupadasProvedores by remember { mutableStateOf(report.vagasOcupadasProvedores) }
+    var andaresProvedores by remember { mutableStateOf(report.andaresProvedores) }
     var condicaoShaft by remember { mutableStateOf(report.condicaoShaft ?: "") }
     var meioEntrada by remember { mutableStateOf(report.meioEntrada ?: "Aéreo") }
     var tipoInstalacao by remember { mutableStateOf(report.tipoInstalacao ?: "CTO") }
@@ -1809,20 +1633,45 @@ fun EditReportScreen(
     var responsavelVistoriaNome by remember { mutableStateOf(report.responsavelVistoriaNome ?: "") }
     var responsavelTelefone by remember { mutableStateOf(report.responsavelTelefone ?: "") }
     var quantidadeBlocos by remember { mutableStateOf(report.quantidadeBlocos ?: "") }
+    var aprovado by remember { mutableStateOf(report.aprovado) }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var cep by remember { mutableStateOf(report.cep ?: "") }
+    var isLoadingCep by remember { mutableStateOf(false) }
+    var cepError by remember { mutableStateOf("") }
+    var cidadeUf by remember { mutableStateOf("") }
     var expandedBairro by remember { mutableStateOf(false) }
     var expandedAndares by remember { mutableStateOf(false) }
     var expandedAptos by remember { mutableStateOf(false) }
     var expandedProvedores by remember { mutableStateOf(false) }
     var expandedAndaresSelecionados by remember { mutableStateOf(false) }
     var andaresSelecionados by remember { mutableStateOf(report.andaresSelecionados.toSet()) }
-    
+
     val context = LocalContext.current
     val andaresArray = context.resources.getStringArray(R.array.numero_andares)
     val aptosArray = context.resources.getStringArray(R.array.apartamentos_por_andar)
     val provedoresArray = context.resources.getStringArray(R.array.numero_provedores)
-    
+
+    LaunchedEffect(cep) {
+        if (cep.length == 8) {
+            isLoadingCep = true
+            cepError = ""
+            val result = fetchViaCep(cep)
+            isLoadingCep = false
+            if (result != null) {
+                endereco = result.logradouro
+                bairro = result.bairro
+                cidadeUf = "${result.localidade} - ${result.uf}"
+            } else {
+                cepError = "CEP não encontrado"
+                cidadeUf = ""
+            }
+        } else {
+            cidadeUf = ""
+            cepError = ""
+        }
+    }
+
     // Atualiza o nome do relatório quando o nome do edifício muda
     LaunchedEffect(nomeEdificio) {
         try {
@@ -1984,10 +1833,13 @@ fun EditReportScreen(
     if (showGeneralPhotoDialog) {
         AlertDialog(
             onDismissRequest = { showGeneralPhotoDialog = false },
-            title = { Text("Selecionar foto") },
+            containerColor = Color.White,
+            titleContentColor = Color(0xFF1A2B4A),
+            textContentColor = Color(0xFF4A5568),
+            title = { Text("Selecionar foto", fontWeight = FontWeight.SemiBold) },
             text = {
                 Column {
-                    Text("Escolha a origem da foto:", modifier = Modifier.padding(bottom = 16.dp))
+                    Text("Escolha a origem da foto:", modifier = Modifier.padding(bottom = 8.dp), color = Color(0xFF4A5568))
                     TextButton(onClick = {
                         val photoFile = File(context.cacheDir, "camera_photo_general_${System.currentTimeMillis()}.jpg")
                         cameraGeneralImageUri = androidx.core.content.FileProvider.getUriForFile(
@@ -1997,886 +1849,390 @@ fun EditReportScreen(
                         )
                         takeGeneralPictureLauncher.launch(cameraGeneralImageUri)
                         showGeneralPhotoDialog = false
-                    }) { Text("Câmera") }
+                    }) { Text("Câmera", color = Color(0xFF2D7DD2)) }
                     TextButton(onClick = {
                         pickGeneralPhotoLauncher.launch("image/*")
                         showGeneralPhotoDialog = false
-                    }) { Text("Galeria") }
-                    // Opcional: Adicionar um botão de Cancelar
-                    TextButton(onClick = { showGeneralPhotoDialog = false }) { Text("Cancelar") }
+                    }) { Text("Galeria", color = Color(0xFF2D7DD2)) }
+                    TextButton(onClick = { showGeneralPhotoDialog = false }) { Text("Cancelar", color = Color(0xFF6B7A99)) }
                 }
             },
-            // Remove confirmButton e dismissButton slots que estavam sendo usados incorretamente
             confirmButton = {},
             dismissButton = {}
         )
     }
 
     // Diálogo de escolha de origem da foto do shaft
-     if (showShaftPhotoDialog) {
+    if (showShaftPhotoDialog) {
         AlertDialog(
             onDismissRequest = { showShaftPhotoDialog = false },
-            title = { Text("Selecionar foto do Shaft") },
+            containerColor = Color.White,
+            titleContentColor = Color(0xFF1A2B4A),
+            textContentColor = Color(0xFF4A5568),
+            title = { Text("Selecionar foto do Shaft", fontWeight = FontWeight.SemiBold) },
             text = {
-                 Column {
-                    Text("Escolha a origem da foto:", modifier = Modifier.padding(bottom = 16.dp))
+                Column {
+                    Text("Escolha a origem da foto:", modifier = Modifier.padding(bottom = 8.dp), color = Color(0xFF4A5568))
                     TextButton(onClick = {
-                         val photoFile = File(context.cacheDir, "camera_photo_shaft_${System.currentTimeMillis()}.jpg")
-                         cameraShaftImageUri = androidx.core.content.FileProvider.getUriForFile(
-                             context,
-                             context.packageName + ".provider",
-                             photoFile
-                         )
+                        val photoFile = File(context.cacheDir, "camera_photo_shaft_${System.currentTimeMillis()}.jpg")
+                        cameraShaftImageUri = androidx.core.content.FileProvider.getUriForFile(
+                            context,
+                            context.packageName + ".provider",
+                            photoFile
+                        )
                         takeShaftPictureLauncher.launch(cameraShaftImageUri)
                         showShaftPhotoDialog = false
-                    }) { Text("Câmera") }
+                    }) { Text("Câmera", color = Color(0xFF2D7DD2)) }
                     TextButton(onClick = {
                         pickShaftPhotoLauncher.launch("image/*")
                         showShaftPhotoDialog = false
-                    }) { Text("Galeria") }
-                     // Opcional: Adicionar um botão de Cancelar
-                    TextButton(onClick = { showShaftPhotoDialog = false }) { Text("Cancelar") }
+                    }) { Text("Galeria", color = Color(0xFF2D7DD2)) }
+                    TextButton(onClick = { showShaftPhotoDialog = false }) { Text("Cancelar", color = Color(0xFF6B7A99)) }
                 }
             },
-            // Remove confirmButton e dismissButton slots que estavam sendo usados incorretamente
             confirmButton = {},
             dismissButton = {}
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        // Adicionar botão de voltar no topo
+
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        unfocusedContainerColor = Color(0xFFF5F6FA),
+        focusedContainerColor  = Color(0xFFF5F6FA),
+        unfocusedBorderColor   = Color(0xFFC8D0E0),
+        focusedBorderColor     = Color(0xFF2D7DD2),
+        unfocusedTextColor     = Color(0xFF1A2B4A),
+        focusedTextColor       = Color(0xFF1A2B4A),
+        unfocusedLabelColor    = Color(0xFF6B7A99),
+        focusedLabelColor      = Color(0xFF2D7DD2),
+        cursorColor            = Color(0xFF2D7DD2),
+        disabledContainerColor = Color(0xFFF5F6FA),
+        disabledBorderColor    = Color(0xFFE8ECF4),
+        disabledTextColor      = Color(0xFF8896B0)
+    )
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFEEF0F5))) {
+
         Row(
             modifier = Modifier
+                .background(Color(0xFF1A2B4A))
                 .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.Start
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Button(
-                onClick = { navController.popBackStack() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondary
-                )
-            ) {
-                Text("Voltar")
+            IconButton(onClick = { navController.popBackStack() }) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Voltar", tint = Color.White)
             }
-        }
-        
-
-
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(20.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Responsável Pela Vistoria",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
+            Text("Editar Relatório", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Color.White)
+            Spacer(modifier = Modifier.weight(1f))
+            Image(
+                painter = painterResource(id = R.drawable.logo_myconnect),
+                contentDescription = "Logo MY CONNECT",
+                modifier = Modifier
+                    .width(100.dp)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White)
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                contentScale = ContentScale.Fit
             )
+            Spacer(modifier = Modifier.width(4.dp))
         }
-        OutlinedTextField(
-            value = responsavelVistoriaNome,
-            onValueChange = { responsavelVistoriaNome = it },
-            label = { Text("Digite o nome do responsável pela vistoria", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Endereço",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
-        
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            OutlinedTextField(
-                value = nomeEdificio,
-                onValueChange = { nomeEdificio = it },
-                label = { Text("Nome do Edifício", color = Color.White) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White
-                )
-            )
-
-            OutlinedTextField(
-                value = endereco,
-                onValueChange = { endereco = it },
-                label = { Text("Rua, Número", color = Color.White) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White
-                )
-            )
-
-            ExposedDropdownMenuBox(
-                expanded = expandedBairro,
-                onExpandedChange = { expandedBairro = it },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = bairro,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Bairro", color = Color.White) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedBairro) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        unfocusedTextColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedBorderColor = Color.White,
-                        focusedBorderColor = Color.White
-                    )
-                )
-
-                ExposedDropdownMenu(
-                    expanded = expandedBairro,
-                    onDismissRequest = { expandedBairro = false }
+            if (showError) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFDF0EE)),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(0.5.dp, Color(0xFFC0392B))
                 ) {
-                    bairrosList.forEach { item ->
-                        DropdownMenuItem(
-                            text = { Text(item) },
-                            onClick = {
-                                bairro = item
-                                expandedBairro = false
-                            }
-                        )
-                    }
+                    Text(errorMessage, color = Color(0xFFC0392B), modifier = Modifier.padding(12.dp), fontSize = 13.sp)
                 }
+                LaunchedEffect(showError) { showError = false }
             }
 
-            OutlinedTextField(
-                value = nome,
-                onValueChange = { },
-                label = { Text("Nome do Relatório", color = Color.White) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                enabled = false,
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White
-                )
-            )
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Informações do Edifício",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Dropdown para número de andares
-            ExposedDropdownMenuBox(
-                expanded = expandedAndares,
-                onExpandedChange = { expandedAndares = it },
-                modifier = Modifier.weight(1f)
-            ) {
+            FormSection("Responsável pela Vistoria") {
                 OutlinedTextField(
-                    value = andares,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Número de Andares", color = Color.White) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAndares) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        unfocusedTextColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedBorderColor = Color.White,
-                        focusedBorderColor = Color.White
-                    )
+                    value = responsavelVistoriaNome, onValueChange = { responsavelVistoriaNome = it },
+                    label = { Text("Nome do responsável") },
+                    modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true
                 )
-
-                ExposedDropdownMenu(
-                    expanded = expandedAndares,
-                    onDismissRequest = { expandedAndares = false }
-                ) {
-                    andaresArray.forEach { item ->
-                        DropdownMenuItem(
-                            text = { Text(item) },
-                            onClick = {
-                                andares = item
-                                expandedAndares = false
-                            }
-                        )
-                    }
-                }
             }
 
-            // Dropdown para apartamentos por andar
-            ExposedDropdownMenuBox(
-                expanded = expandedAptos,
-                onExpandedChange = { expandedAptos = it },
-                modifier = Modifier.weight(1f)
-            ) {
+            FormSection("Endereço") {
                 OutlinedTextField(
-                    value = apartamentosPorAndar,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Aptos por Andar", color = Color.White) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAptos) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        unfocusedTextColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedBorderColor = Color.White,
-                        focusedBorderColor = Color.White
-                    )
+                    value = cep,
+                    onValueChange = { newVal -> val digits = newVal.filter { it.isDigit() }; if (digits.length <= 8) cep = digits },
+                    label = { Text("CEP") },
+                    placeholder = { Text("00000-000", color = Color(0xFFAAB4C8)) },
+                    visualTransformation = CepVisualTransformation(),
+                    trailingIcon = { if (isLoadingCep) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF2D7DD2), strokeWidth = 2.dp) },
+                    isError = cepError.isNotEmpty(),
+                    supportingText = { when { cepError.isNotEmpty() -> Text(cepError, color = MaterialTheme.colorScheme.error); cidadeUf.isNotEmpty() -> Text(cidadeUf, color = Color(0xFF6B7A99)) } },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), colors = fieldColors
                 )
-
-                ExposedDropdownMenu(
-                    expanded = expandedAptos,
-                    onDismissRequest = { expandedAptos = false }
-                ) {
-                    aptosArray.forEach { item ->
-                        DropdownMenuItem(
-                            text = { Text(item) },
-                            onClick = {
-                                apartamentosPorAndar = item
-                                expandedAptos = false
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Campo para quantidade de blocos
-        OutlinedTextField(
-            value = quantidadeBlocos,
-            onValueChange = { newValue ->
-                quantidadeBlocos = newValue
-            },
-            label = { Text("Quantidade de Blocos", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Infraestrutura",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
-
-        // Dropdown para número de provedores
-        ExposedDropdownMenuBox(
-            expanded = expandedProvedores,
-            onExpandedChange = { expandedProvedores = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
-        ) {
-            OutlinedTextField(
-                value = provedores,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Número de Provedores", color = Color.White) },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedProvedores) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .menuAnchor(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White
+                OutlinedTextField(
+                    value = nomeEdificio, onValueChange = { nomeEdificio = it },
+                    label = { Text("Nome do Edifício") },
+                    modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true
                 )
-            )
-
-            ExposedDropdownMenu(
-                expanded = expandedProvedores,
-                onDismissRequest = { expandedProvedores = false }
-            ) {
-                provedoresArray.forEach { item ->
-                    DropdownMenuItem(
-                        text = { Text(item) },
-                        onClick = {
-                            provedores = item
-                            // Inicializa a lista de nomes de provedores com strings vazias
-                            nomesProvedores = List(item.toInt()) { "" }
-                            expandedProvedores = false
-                        }
-                    )
-                }
-            }
-        }
-
-        // Campos para nomes dos provedores
-        if (provedores.isNotEmpty() && provedores.toIntOrNull() ?: 0 > 0) {
-            Text(
-                text = "Nomes dos Provedores",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(vertical = 8.dp),
-                color = Color.White
-            )
-            
-            Column {
-                repeat(provedores.toInt()) { index ->
+                OutlinedTextField(
+                    value = endereco, onValueChange = { endereco = it },
+                    label = { Text("Rua, Número") },
+                    modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true
+                )
+                ExposedDropdownMenuBox(expanded = expandedBairro, onExpandedChange = { expandedBairro = it }, modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
-                        value = nomesProvedores.getOrNull(index) ?: "",
-                        onValueChange = { newValue ->
-                            val newNomes = nomesProvedores.toMutableList()
-                            if (index < newNomes.size) {
-                                newNomes[index] = newValue
-                            } else {
-                                newNomes.add(newValue)
-                            }
-                            nomesProvedores = newNomes
-                        },
-                        label = { Text("Nome do Provedor ${index + 1}", color = Color.White) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                            focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White,
-                            focusedBorderColor = Color.White
-                        )
+                        value = bairro, onValueChange = {}, readOnly = true,
+                        label = { Text("Bairro") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedBairro) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors
+                    )
+                    ExposedDropdownMenu(expanded = expandedBairro, onDismissRequest = { expandedBairro = false }, modifier = Modifier.background(Color.White)) {
+                        bairrosList.forEach { item -> DropdownMenuItem(text = { Text(item, color = Color(0xFF1A2B4A)) }, onClick = { bairro = item; expandedBairro = false }) }
+                    }
+                }
+                if (nome.isNotEmpty()) {
+                    OutlinedTextField(
+                        value = nome, onValueChange = {}, enabled = false,
+                        label = { Text("Nome do Relatório") },
+                        modifier = Modifier.fillMaxWidth(), colors = fieldColors
                     )
                 }
             }
-        }
 
-        OutlinedTextField(
-            value = condicaoShaft,
-            onValueChange = { condicaoShaft = it },
-            label = { Text("Condições do Shaft", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            minLines = 3,
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = observacoesGerais,
-            onValueChange = { observacoesGerais = it },
-            label = { Text("Observações Gerais", color = Color.White) },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Botão Adicionar Fotos do Shaft - Mantido aqui ou mover se necessário
-        Button(
-            onClick = { showShaftPhotoDialog = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp)
-        ) {
-            Text("Adicionar Fotos do Shaft")
-        }
-        // Exibição das fotos do shaft (logo após o botão)
-        if (shaftPhotos.isNotEmpty()) {
-            Text(
-                text = "Fotos do Shaft Registradas:",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = Color.White,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(100.dp)
-                    .padding(bottom = 8.dp)
-            ) {
-                items(shaftPhotos) { photoUrl ->
-                    Image(
-                        painter = rememberAsyncImagePainter(photoUrl),
-                        contentDescription = "Foto do shaft registrada",
-                        modifier = Modifier
-                            .size(100.dp)
-                            .padding(end = 8.dp)
-                            .clickable { selectedPhotoUrl = photoUrl },
-                        contentScale = ContentScale.Crop
-                    )
+            FormSection("Informações do Edifício") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ExposedDropdownMenuBox(expanded = expandedAndares, onExpandedChange = { expandedAndares = it }, modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(value = andares, onValueChange = {}, readOnly = true, label = { Text("Andares") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAndares) }, modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors)
+                        ExposedDropdownMenu(expanded = expandedAndares, onDismissRequest = { expandedAndares = false }, modifier = Modifier.background(Color.White)) {
+                            andaresArray.forEach { item -> DropdownMenuItem(text = { Text(item, color = Color(0xFF1A2B4A)) }, onClick = { andares = item; expandedAndares = false }) }
+                        }
+                    }
+                    ExposedDropdownMenuBox(expanded = expandedAptos, onExpandedChange = { expandedAptos = it }, modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(value = apartamentosPorAndar, onValueChange = {}, readOnly = true, label = { Text("Aptos/Andar") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAptos) }, modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors)
+                        ExposedDropdownMenu(expanded = expandedAptos, onDismissRequest = { expandedAptos = false }, modifier = Modifier.background(Color.White)) {
+                            aptosArray.forEach { item -> DropdownMenuItem(text = { Text(item, color = Color(0xFF1A2B4A)) }, onClick = { apartamentosPorAndar = item; expandedAptos = false }) }
+                        }
+                    }
                 }
-            }
-        }
-
-        // Campo para meio de entrada como RadioGroup
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
-        ) {
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-            Row(
-                modifier = Modifier.padding(bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Meio de Entrada do Condomínio",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = meioEntrada == "Aéreo",
-                        onClick = { meioEntrada = "Aéreo" },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = Color.White,
-                            unselectedColor = Color.White
-                        )
+                OutlinedTextField(value = quantidadeBlocos, onValueChange = { quantidadeBlocos = it }, label = { Text("Quantidade de Blocos") }, modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true)
+                ExposedDropdownMenuBox(expanded = expandedAndaresSelecionados, onExpandedChange = { expandedAndaresSelecionados = it }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = if (andaresSelecionados.isEmpty()) "" else andaresSelecionados.sorted().joinToString(", "),
+                        onValueChange = {}, readOnly = true,
+                        label = { Text("Andares para instalação CTO/Modular") },
+                        placeholder = { Text("Selecione os andares", color = Color(0xFFAAB4C8)) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAndaresSelecionados) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors
                     )
-                    Text(
-                        text = "Aéreo",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(start = 4.dp),
-                        color = Color.White
-                    )
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = meioEntrada == "Subterrâneo",
-                        onClick = { meioEntrada = "Subterrâneo" },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = Color.White,
-                            unselectedColor = Color.White
-                        )
-                    )
-                    Text(
-                        text = "Subterrâneo",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(start = 4.dp),
-                        color = Color.White
-                    )
-                }
-            }
-        }
-
-        // Campo para tipo de instalação como RadioGroup
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
-        ) {
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-            Row(
-                modifier = Modifier.padding(bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Tipo de Instalação",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = tipoInstalacao == "CTO",
-                        onClick = { tipoInstalacao = "CTO" },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = Color.White,
-                            unselectedColor = Color.White
-                        )
-                    )
-                    Text(
-                        text = "CTO",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(start = 4.dp),
-                        color = Color.White
-                    )
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = tipoInstalacao == "Modular",
-                        onClick = { tipoInstalacao = "Modular" },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = Color.White,
-                            unselectedColor = Color.White
-                        )
-                    )
-                    Text(
-                        text = "Modular",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(start = 4.dp),
-                        color = Color.White
-                    )
-                }
-            }
-        }
-
-        // Seção de Possíveis Andares de Instalação
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp)
-        ) {
-            Text(
-                text = "Andares para Instalação da CTO ou Modular",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(bottom = 8.dp),
-                color = Color.White
-            )
-            
-            ExposedDropdownMenuBox(
-                expanded = expandedAndaresSelecionados,
-                onExpandedChange = { expandedAndaresSelecionados = it },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = if (andaresSelecionados.isEmpty()) "Selecione os andares" 
-                           else andaresSelecionados.sorted().joinToString(", "),
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Andares para Instalação da CTO ou Modular", color = Color.White) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAndaresSelecionados) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                        unfocusedTextColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedBorderColor = Color.White,
-                        focusedBorderColor = Color.White
-                    ),
-                    textStyle = MaterialTheme.typography.titleMedium.copy(
-                        color = Color.White
-                    )
-                )
-
-                ExposedDropdownMenu(
-                    expanded = expandedAndaresSelecionados,
-                    onDismissRequest = { expandedAndaresSelecionados = false }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 200.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            val totalAndaresInt = andares.toIntOrNull() ?: 0
-                            if (totalAndaresInt > 0) {
-                                for (andar in 1..totalAndaresInt) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                andaresSelecionados = if (andaresSelecionados.contains(andar)) {
-                                                    andaresSelecionados.minus(andar)
-                                                } else {
-                                                    andaresSelecionados.plus(andar)
-                                                }
-                                            }
-                                            .padding(vertical = 8.dp, horizontal = 16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Checkbox(
-                                            checked = andaresSelecionados.contains(andar),
-                                            onCheckedChange = null
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Andar $andar",
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
+                    ExposedDropdownMenu(expanded = expandedAndaresSelecionados, onDismissRequest = { expandedAndaresSelecionados = false }, modifier = Modifier.background(Color.White)) {
+                        Box(modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
+                            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                                val totalAndaresInt = andares.toIntOrNull() ?: 0
+                                if (totalAndaresInt > 0) {
+                                    for (andar in 1..totalAndaresInt) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth()
+                                                .clickable { andaresSelecionados = if (andaresSelecionados.contains(andar)) andaresSelecionados.minus(andar) else andaresSelecionados.plus(andar) }
+                                                .padding(vertical = 8.dp, horizontal = 16.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Checkbox(checked = andaresSelecionados.contains(andar), onCheckedChange = null, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF2D7DD2), uncheckedColor = Color(0xFF6B7A99)))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Andar $andar", style = MaterialTheme.typography.bodyLarge, color = Color(0xFF1A2B4A))
+                                        }
                                     }
+                                } else {
+                                    Text("Selecione o número de andares primeiro", modifier = Modifier.padding(16.dp), color = Color(0xFF6B7A99))
                                 }
-                            } else {
-                                Text(
-                                    text = "Selecione o número de andares primeiro",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.padding(16.dp)
-                                )
                             }
                         }
                     }
                 }
             }
-        }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.15f))
-        Row(
-            modifier = Modifier.padding(bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(modifier = Modifier.width(4.dp).height(22.dp), color = Color.White) {}
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Responsável",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
-        
-        OutlinedTextField(
-            value = responsavelNome,
-            onValueChange = { responsavelNome = it },
-            label = { Text("Nome do Responsável", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-
-        OutlinedTextField(
-            value = responsavelTelefone,
-            onValueChange = { newValue ->
-                val numbers = newValue.filter { it.isDigit() }
-                if (numbers.length <= 11) {
-                    responsavelTelefone = numbers
-                }
-            },
-            label = { Text("Telefone do Responsável", color = Color.White) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Phone,
-                imeAction = ImeAction.Done
-            ),
-            placeholder = { Text("00000000000", color = Color.White.copy(alpha = 0.7f)) },
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.6f),
-                focusedContainerColor = Color(0xFF0D14C0).copy(alpha = 0.7f),
-                unfocusedTextColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedBorderColor = Color.White,
-                focusedBorderColor = Color.White
-            )
-        )
-        
-        Button(
-            onClick = {
-                try {
-                    Log.d("EditReportScreen", "Iniciando salvamento do relatório")
-                    
-                    if (nomeEdificio.isEmpty() || endereco.isEmpty() || bairro.isEmpty()) {
-                        Log.d("EditReportScreen", "Campos obrigatórios não preenchidos")
-                        errorMessage = "Por favor, preencha o nome do edifício, endereço e bairro"
-                        showError = true
-                        return@Button
+            FormSection("Infraestrutura") {
+                ExposedDropdownMenuBox(expanded = expandedProvedores, onExpandedChange = { expandedProvedores = it }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(value = provedores, onValueChange = {}, readOnly = true, label = { Text("Número de Provedores") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedProvedores) }, modifier = Modifier.fillMaxWidth().menuAnchor(), colors = fieldColors)
+                    ExposedDropdownMenu(expanded = expandedProvedores, onDismissRequest = { expandedProvedores = false }, modifier = Modifier.background(Color.White)) {
+                        provedoresArray.forEach { item -> DropdownMenuItem(text = { Text(item, color = Color(0xFF1A2B4A)) }, onClick = {
+                            val n = item.toInt()
+                            provedores = item
+                            nomesProvedores = List(n) { i -> nomesProvedores.getOrElse(i) { "" } }
+                            vagasOcupadasProvedores = List(n) { i -> vagasOcupadasProvedores.getOrElse(i) { "" } }
+                            andaresProvedores = List(n) { i -> andaresProvedores.getOrElse(i) { "" } }
+                            expandedProvedores = false
+                        }) }
                     }
+                }
+                if (provedores.isNotEmpty() && (provedores.toIntOrNull() ?: 0) > 0) {
+                    repeat(provedores.toInt()) { index ->
+                        if (index > 0) HorizontalDivider(color = Color(0xFFE8ECF4), modifier = Modifier.padding(vertical = 4.dp))
+                        Text("Provedor ${index + 1}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF6B7A99))
+                        OutlinedTextField(
+                            value = nomesProvedores.getOrNull(index) ?: "",
+                            onValueChange = { v -> val l = nomesProvedores.toMutableList(); if (index < l.size) l[index] = v else l.add(v); nomesProvedores = l },
+                            label = { Text("Nome") },
+                            modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true
+                        )
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = vagasOcupadasProvedores.getOrNull(index) ?: "",
+                                onValueChange = { v -> val l = vagasOcupadasProvedores.toMutableList(); if (index < l.size) l[index] = v else l.add(v); vagasOcupadasProvedores = l },
+                                label = { Text("Vagas ocupadas") },
+                                modifier = Modifier.weight(1f), colors = fieldColors, singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                            OutlinedTextField(
+                                value = andaresProvedores.getOrNull(index) ?: "",
+                                onValueChange = { v -> val l = andaresProvedores.toMutableList(); if (index < l.size) l[index] = v else l.add(v); andaresProvedores = l },
+                                label = { Text("Andares das caixas") },
+                                modifier = Modifier.weight(1f), colors = fieldColors, singleLine = true
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(value = condicaoShaft, onValueChange = { condicaoShaft = it }, label = { Text("Condições do Shaft") }, modifier = Modifier.fillMaxWidth(), minLines = 3, colors = fieldColors)
+                OutlinedButton(onClick = { showShaftPhotoDialog = true }, modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, Color(0xFF2D7DD2)), shape = RoundedCornerShape(8.dp)) {
+                    Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF2D7DD2), modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Adicionar Fotos do Shaft", color = Color(0xFF2D7DD2))
+                }
+                if (shaftPhotos.isNotEmpty()) {
+                    LazyRow(modifier = Modifier.fillMaxWidth().height(90.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(shaftPhotos) { photoUrl ->
+                            Image(painter = rememberAsyncImagePainter(photoUrl), contentDescription = null, modifier = Modifier.size(90.dp).clip(RoundedCornerShape(8.dp)).clickable { selectedPhotoUrl = photoUrl }, contentScale = ContentScale.Crop)
+                        }
+                    }
+                }
+                OutlinedTextField(value = observacoesGerais, onValueChange = { observacoesGerais = it }, label = { Text("Observações Gerais") }, modifier = Modifier.fillMaxWidth(), minLines = 3, colors = fieldColors)
+            }
 
-            val enderecoCompleto = "$endereco, $bairro"
-            Log.d("NewReportScreen", "Endereço completo: $enderecoCompleto")
-            
-            Log.d("NewReportScreen", "Criando novo relatório")
-            val updatedReport = report.copy(
-                nomeEdificio = nomeEdificio,
-                nome = nome,
-                endereco = enderecoCompleto,
-                andares = andares.toIntOrNull() ?: 0,
-                andaresSelecionados = andaresSelecionados.toList(),
-                apartamentosPorAndar = apartamentosPorAndar.toIntOrNull() ?: 0,
-                provedores = provedores.toIntOrNull() ?: 0,
-                nomesProvedores = nomesProvedores,
-                condicaoShaft = condicaoShaft,
-                fotosShaft = shaftPhotos,
-                meioEntrada = meioEntrada,
-                tipoInstalacao = tipoInstalacao,
-                observacoesGerais = observacoesGerais,
-                photos = photos,
-                responsavelNome = responsavelNome,
-                responsavelTelefone = responsavelTelefone,
-                responsavelVistoriaNome = responsavelVistoriaNome,
-                quantidadeBlocos = quantidadeBlocos,
-                date = Date()
-            )
-            
-            Log.d("EditReportScreen", "Atualizando relatório no ViewModel")
-            viewModel.updateReport(updatedReport)
-            Log.d("EditReportScreen", "Relatório atualizado com sucesso")
-            navController.popBackStack()
-            Toast.makeText(context, "Relatório atualizado com sucesso", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Log.e("EditReportScreen", "Erro ao atualizar relatório: ${e.message}", e)
-            errorMessage = "Erro ao atualizar relatório: ${e.message}"
-            showError = true
-        }
-    },
-    modifier = Modifier
-        .fillMaxWidth()
-        .padding(top = 16.dp)
-                .fillMaxWidth()
-                .padding(top = 16.dp)
-        ) {
-            Text("Salvar Relatório")
+            FormSection("Meio de Entrada") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    listOf("Aéreo", "Subterrâneo").forEach { option ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { meioEntrada = option }) {
+                            RadioButton(selected = meioEntrada == option, onClick = { meioEntrada = option }, colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF2D7DD2), unselectedColor = Color(0xFF6B7A99)))
+                            Text(option, color = Color(0xFF1A2B4A), fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+
+            FormSection("Tipo de Instalação") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    listOf("CTO", "Modular").forEach { option ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { tipoInstalacao = option }) {
+                            RadioButton(selected = tipoInstalacao == option, onClick = { tipoInstalacao = option }, colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF2D7DD2), unselectedColor = Color(0xFF6B7A99)))
+                            Text(option, color = Color(0xFF1A2B4A), fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+
+            FormSection("Responsável") {
+                OutlinedTextField(value = responsavelNome, onValueChange = { responsavelNome = it }, label = { Text("Nome do responsável") }, modifier = Modifier.fillMaxWidth(), colors = fieldColors, singleLine = true)
+                OutlinedTextField(
+                    value = responsavelTelefone,
+                    onValueChange = { newValue -> val numbers = newValue.filter { it.isDigit() }; if (numbers.length <= 11) responsavelTelefone = numbers },
+                    label = { Text("Telefone") }, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done),
+                    placeholder = { Text("00000000000", color = Color(0xFFAAB4C8)) },
+                    colors = fieldColors, singleLine = true
+                )
+            }
+
+            // ── Resultado da Vistoria ───────────────────────────────
+            FormSection("Resultado da Vistoria") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    listOf(true to "Aprovado", false to "Reprovado").forEach { (valor, label) ->
+                        val selected = aprovado == valor
+                        val bgColor = when { selected && valor -> Color(0xFF1E7E45); selected && !valor -> Color(0xFFC0392B); else -> Color(0xFFF5F6FA) }
+                        val textColor = if (selected) Color.White else Color(0xFF6B7A99)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(bgColor)
+                                .clickable { aprovado = if (aprovado == valor) null else valor }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = textColor)
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = {
+                    try {
+                        Log.d("EditReportScreen", "Iniciando salvamento do relatório")
+                        if (nomeEdificio.isEmpty() || endereco.isEmpty() || bairro.isEmpty()) {
+                            Log.d("EditReportScreen", "Campos obrigatórios não preenchidos")
+                            errorMessage = "Por favor, preencha o nome do edifício, endereço e bairro"
+                            showError = true
+                            return@Button
+                        }
+                        val enderecoCompleto = "$endereco, $bairro"
+                        val updatedReport = report.copy(
+                            nomeEdificio = nomeEdificio,
+                            nome = nome,
+                            endereco = enderecoCompleto,
+                            andares = andares.toIntOrNull() ?: 0,
+                            andaresSelecionados = andaresSelecionados.toList(),
+                            apartamentosPorAndar = apartamentosPorAndar.toIntOrNull() ?: 0,
+                            provedores = provedores.toIntOrNull() ?: 0,
+                            nomesProvedores = nomesProvedores,
+                            vagasOcupadasProvedores = vagasOcupadasProvedores,
+                            andaresProvedores = andaresProvedores,
+                            condicaoShaft = condicaoShaft,
+                            fotosShaft = shaftPhotos,
+                            meioEntrada = meioEntrada,
+                            tipoInstalacao = tipoInstalacao,
+                            observacoesGerais = observacoesGerais,
+                            photos = photos,
+                            responsavelNome = responsavelNome,
+                            responsavelTelefone = responsavelTelefone,
+                            responsavelVistoriaNome = responsavelVistoriaNome,
+                            quantidadeBlocos = quantidadeBlocos,
+                            cep = cep,
+                            date = Date(),
+                            aprovado = aprovado
+                        )
+                        viewModel.updateReport(updatedReport)
+                        Log.d("EditReportScreen", "Relatório atualizado com sucesso")
+                        navController.popBackStack()
+                        Toast.makeText(context, "Relatório atualizado com sucesso", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Log.e("EditReportScreen", "Erro ao atualizar relatório: ${e.message}", e)
+                        errorMessage = "Erro ao atualizar relatório: ${e.message}"
+                        showError = true
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D7DD2)),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Salvar Relatório", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            }
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 
-
-    // Diálogo para exibir a foto em tamanho maior
-    if (selectedPhotoUrl != null) {
-        AlertDialog(
-            onDismissRequest = { selectedPhotoUrl = null },
-            title = { Text("Visualizar Foto") },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Image(
-                        painter = rememberAsyncImagePainter(selectedPhotoUrl),
-                        contentDescription = "Foto expandida",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(300.dp), // Altura ajustável conforme necessário
-                        contentScale = ContentScale.Fit
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { selectedPhotoUrl = null }) {
-                    Text("Fechar")
-                }
-            }
-        )
+    selectedPhotoUrl?.let { url ->
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.9f)).clickable { selectedPhotoUrl = null }, contentAlignment = Alignment.Center) {
+            Image(painter = rememberAsyncImagePainter(url), contentDescription = null, modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
+        }
     }
 }
 
@@ -2953,128 +2309,200 @@ private fun generatePdf(context: AndroidContext, report: Report) {
         val pdfWriter = PdfWriter(file)
         val pdfDocument = PdfDocument(pdfWriter)
         val document = Document(pdfDocument)
-        
-        // Título
-        document.add(Paragraph("Responsável Pela Vistoria: ${report.responsavelNome}").setBold().setFontSize(16f))
-        document.add(Paragraph("Relatório do Edifício: ${report.nomeEdificio}").setBold().setFontSize(18f))
-        document.add(Paragraph("Data: ${dateFormat.format(report.date)}"))
 
-        // Informações do edifício em formato textual, não tabela
-        document.add(Paragraph("Informações do Edifício").setFontSize(16f).setBold())
-        document.add(Paragraph("Nome do Edifício: ${report.nomeEdificio}"))
-        document.add(Paragraph("Endereço: ${report.endereco}"))
-        document.add(Paragraph("Andares: ${report.andares}"))
-        document.add(Paragraph("Andares para Instalação da CTO ou Modular: ${report.andaresSelecionados.joinToString(", ")}"))
-        document.add(Paragraph("Apartamentos por Andar: ${report.apartamentosPorAndar}"))
-        document.add(Paragraph("Quantidade de Blocos: ${report.quantidadeBlocos}"))
-        document.add(Paragraph("Condição Shaft: ${report.condicaoShaft}"))
-        document.add(Paragraph("Meio de Entrada: ${report.meioEntrada}"))
-        document.add(Paragraph("Tipo de Instalação: ${report.tipoInstalacao}"))
-        document.add(Paragraph("\n"))
+        // ── Cabeçalho com logo ────────────────────────────────────────
+        try {
+            val bitmap = BitmapFactory.decodeResource(context.resources, R.drawable.logo_myconnect)
+            val logoTmp = File(context.cacheDir, "logo_pdf_tmp.png")
+            JavaFileOutputStream(logoTmp).use { fos -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos) }
 
-        // Provedores
+            val logoImg = ITextImage(ImageDataFactory.create(logoTmp.absolutePath)).scaleToFit(160f, 55f)
+
+            val headerTable = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f)))
+                .useAllAvailableWidth()
+                .setMarginBottom(6f)
+
+            headerTable.addCell(
+                Cell().add(logoImg)
+                    .setBorder(Border.NO_BORDER)
+                    .setVerticalAlignment(ITextVerticalAlignment.MIDDLE)
+            )
+            headerTable.addCell(
+                Cell()
+                    .add(Paragraph("Relatório de Vistoria Técnica")
+                        .setBold().setFontSize(13f)
+                        .setTextAlignment(TextAlignment.RIGHT))
+                    .add(Paragraph(dateFormat.format(report.date))
+                        .setFontSize(10f)
+                        .setTextAlignment(TextAlignment.RIGHT)
+                        .setFontColor(ColorConstants.GRAY))
+                    .setBorder(Border.NO_BORDER)
+                    .setVerticalAlignment(ITextVerticalAlignment.MIDDLE)
+            )
+
+            document.add(headerTable)
+            document.add(LineSeparator(SolidLine(1f)))
+            document.add(Paragraph("\n").setFontSize(4f))
+            logoTmp.delete()
+        } catch (e: Exception) {
+            Log.e("PDFGeneration", "Erro ao adicionar logo ao PDF: ${e.message}")
+        }
+
+        // ── Cores e helpers ───────────────────────────────────────────
+        val navy      = DeviceRgb(26, 43, 74)
+        val blue      = DeviceRgb(45, 125, 210)
+        val rowAlt    = DeviceRgb(240, 242, 245)
+        val rowBorder = DeviceRgb(220, 224, 234)
+        val labelGray = DeviceRgb(107, 122, 153)
+
+        fun secHeader(title: String): Table {
+            val t = Table(UnitValue.createPercentArray(floatArrayOf(100f)))
+                .useAllAvailableWidth().setMarginTop(10f).setMarginBottom(0f)
+            t.addCell(
+                Cell().add(Paragraph(title).setBold().setFontSize(10f).setFontColor(ColorConstants.WHITE))
+                    .setBackgroundColor(navy).setPadding(5f).setBorder(Border.NO_BORDER)
+            )
+            return t
+        }
+
+        fun infoTable(vararg rows: Pair<String, String>): Table {
+            val t = Table(UnitValue.createPercentArray(floatArrayOf(38f, 62f))).useAllAvailableWidth()
+            rows.forEachIndexed { i, (label, value) ->
+                val bg = if (i % 2 == 0) rowAlt else ColorConstants.WHITE
+                val bot = SolidBorder(rowBorder, 0.5f)
+                t.addCell(Cell().add(Paragraph(label).setBold().setFontSize(9f).setFontColor(labelGray))
+                    .setBackgroundColor(bg).setPaddingLeft(8f).setPaddingTop(5f).setPaddingBottom(5f)
+                    .setBorderLeft(Border.NO_BORDER).setBorderTop(Border.NO_BORDER)
+                    .setBorderRight(Border.NO_BORDER).setBorderBottom(bot))
+                t.addCell(Cell().add(Paragraph(value.ifEmpty { "-" }).setFontSize(9f))
+                    .setBackgroundColor(bg).setPaddingLeft(8f).setPaddingTop(5f).setPaddingBottom(5f)
+                    .setBorderLeft(Border.NO_BORDER).setBorderTop(Border.NO_BORDER)
+                    .setBorderRight(Border.NO_BORDER).setBorderBottom(bot))
+            }
+            return t
+        }
+
+        // ── Identificação do Edifício ─────────────────────────────────
+        val cepFmt = report.cep.takeIf { it.length == 8 }?.let { "${it.take(5)}-${it.drop(5)}" } ?: report.cep.ifEmpty { "-" }
+        document.add(secHeader("IDENTIFICAÇÃO DO EDIFÍCIO"))
+        document.add(infoTable(
+            "Nome do Edifício"        to report.nomeEdificio,
+            "CEP"                     to cepFmt,
+            "Endereço"                to report.endereco,
+            "Andares"                 to report.andares.toString(),
+            "Aptos por Andar"         to report.apartamentosPorAndar.toString(),
+            "Qtd. de Blocos"          to (report.quantidadeBlocos ?: "-"),
+            "Andares p/ CTO/Modular"  to report.andaresSelecionados.joinToString(", ").ifEmpty { "-" }
+        ))
+
+        // ── Infraestrutura ────────────────────────────────────────────
+        document.add(secHeader("INFRAESTRUTURA"))
+        document.add(infoTable(
+            "Meio de Entrada"   to report.meioEntrada,
+            "Tipo de Instalação" to report.tipoInstalacao,
+            "Condição do Shaft" to report.condicaoShaft.ifEmpty { "-" }
+        ))
+
+        // ── Provedores ────────────────────────────────────────────────
+        document.add(secHeader("PROVEDORES (${report.provedores})"))
         if (report.nomesProvedores.isNotEmpty()) {
-            document.add(Paragraph("Provedores Cadastrados").setFontSize(16f).setBold())
-            for (nomeProvedor in report.nomesProvedores) {
-                document.add(Paragraph("- $nomeProvedor").setFontSize(13f))
+            val pt = Table(UnitValue.createPercentArray(floatArrayOf(8f, 38f, 27f, 27f))).useAllAvailableWidth()
+            listOf("#", "Nome", "Vagas Ocupadas", "Andares das Caixas").forEach { h ->
+                pt.addHeaderCell(Cell().add(Paragraph(h).setBold().setFontSize(9f).setFontColor(ColorConstants.WHITE))
+                    .setBackgroundColor(blue).setPadding(5f).setBorder(Border.NO_BORDER))
             }
-            document.add(Paragraph("\n"))
+            report.nomesProvedores.forEachIndexed { i, nome ->
+                val bg  = if (i % 2 == 0) rowAlt else ColorConstants.WHITE
+                val bot = SolidBorder(rowBorder, 0.5f)
+                fun pc(text: String) = Cell().add(Paragraph(text.ifEmpty { "-" }).setFontSize(9f))
+                    .setBackgroundColor(bg).setPadding(5f)
+                    .setBorderLeft(Border.NO_BORDER).setBorderTop(Border.NO_BORDER)
+                    .setBorderRight(Border.NO_BORDER).setBorderBottom(bot)
+                pt.addCell(pc("${i + 1}"))
+                pt.addCell(pc(nome))
+                pt.addCell(pc(report.vagasOcupadasProvedores.getOrElse(i) { "" }))
+                pt.addCell(pc(report.andaresProvedores.getOrElse(i) { "" }))
+            }
+            document.add(pt)
         } else {
-            document.add(Paragraph("Provedores Cadastrados: Nenhum informado").setFontSize(13f))
-            document.add(Paragraph("\n"))
+            document.add(Paragraph("Nenhum provedor informado.")
+                .setFontSize(9f).setFontColor(labelGray).setPaddingLeft(8f).setPaddingTop(5f))
         }
 
-        
-        // Meio de Entrada e Tipo de Instalação
-        document.add(Paragraph("Detalhes da Instalação").setFontSize(16f).setBold())
-        document.add(Paragraph("Meio de Entrada: ${report.meioEntrada}"))
-        document.add(Paragraph("Tipo de Instalação: ${report.tipoInstalacao}"))
-        document.add(Paragraph("\n"))
-        
-        // Observações Gerais
+        // ── Observações Gerais ────────────────────────────────────────
         if (report.observacoesGerais.isNotEmpty()) {
-            document.add(Paragraph("Observações Gerais").setFontSize(16f).setBold())
-            document.add(Paragraph(report.observacoesGerais))
-            document.add(Paragraph("\n"))
+            document.add(secHeader("OBSERVAÇÕES GERAIS"))
+            document.add(Paragraph(report.observacoesGerais)
+                .setFontSize(9f).setPaddingLeft(8f).setPaddingTop(6f).setPaddingBottom(6f))
         }
-        
-        // Responsável
-        document.add(Paragraph("Responsável").setFontSize(16f).setBold())
-        document.add(Paragraph("Nome: ${report.responsavelNome}"))
-        document.add(Paragraph("Telefone: ${report.responsavelTelefone}"))
-        document.add(Paragraph("\n"))
-        
-        // Fotos do Shaft
+
+        // ── Resultado ─────────────────────────────────────────────────
+        document.add(secHeader("RESULTADO DA VISTORIA"))
+        val resultadoTexto = when (report.aprovado) {
+            true  -> "✓  APROVADO"
+            false -> "✗  REPROVADO"
+            null  -> "Não avaliado"
+        }
+        val resultadoCor = when (report.aprovado) {
+            true  -> DeviceRgb(30, 126, 69)
+            false -> DeviceRgb(192, 57, 43)
+            null  -> DeviceRgb(107, 122, 153)
+        }
+        document.add(Paragraph(resultadoTexto).setBold().setFontSize(13f).setFontColor(resultadoCor)
+            .setPaddingLeft(8f).setPaddingTop(8f).setPaddingBottom(8f))
+
+        // ── Responsáveis ──────────────────────────────────────────────
+        document.add(secHeader("RESPONSÁVEIS"))
+        document.add(infoTable(
+            "Responsável pela Vistoria" to report.responsavelVistoriaNome.ifEmpty { "-" },
+            "Responsável do Edifício"   to report.responsavelNome.ifEmpty { "-" },
+            "Telefone"                  to report.responsavelTelefone.ifEmpty { "-" }
+        ))
+
+        // ── Fotos do Shaft ────────────────────────────────────────────
         if (report.fotosShaft.isNotEmpty()) {
-            document.add(Paragraph("Fotos do Shaft").setFontSize(16f).setBold())
+            document.add(secHeader("FOTOS DO SHAFT"))
+            val shaftGrid = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f))).useAllAvailableWidth().setMarginTop(4f)
+            var shaftCols = 0
             for (photoPath in report.fotosShaft) {
-                Log.d("PDFGeneration", "Processando foto do shaft: $photoPath")
                 try {
-                    val imageFile: File? = if (photoPath.startsWith("http")) {
-                        runBlocking {
-                            Log.d("PDFGeneration", "Baixando imagem do shaft de URL: $photoPath (thread segura)")
-                            downloadImageToTempFile(context, photoPath, "shaft_photo_")
-                        }
-                    } else {
-                        val file = File(photoPath)
-                        if (file.exists()) file else null
-                    }
+                    val imageFile: File? = if (photoPath.startsWith("http"))
+                        runBlocking { downloadImageToTempFile(context, photoPath, "shaft_photo_") }
+                    else File(photoPath).takeIf { it.exists() }
                     if (imageFile != null && imageFile.exists()) {
-                        Log.d("PDFGeneration", "Arquivo de imagem existe: ${imageFile.absolutePath}")
-                        val imageData = ImageDataFactory.create(imageFile.absolutePath)
-                        val image = ITextImage(imageData)
-                        image.setWidth(300f)
-                        document.add(image)
-                        Log.d("PDFGeneration", "Imagem do shaft adicionada ao PDF")
-                        if (photoPath.startsWith("http")) {
-                            imageFile.delete()
-                            Log.d("PDFGeneration", "Arquivo temporário deletado: ${imageFile.absolutePath}")
-                        }
-                    } else {
-                        Log.e("PDFGeneration", "Arquivo de imagem não existe: $photoPath")
+                        val img = ITextImage(ImageDataFactory.create(imageFile.absolutePath)).setAutoScaleWidth(true)
+                        shaftGrid.addCell(Cell().add(img).setBorder(Border.NO_BORDER).setPadding(4f))
+                        if (photoPath.startsWith("http")) imageFile.delete()
+                        shaftCols++
                     }
-                } catch (e: Exception) {
-                    Log.e("PDFGeneration", "Error adding shaft photo: ${e.message}")
-                }
+                } catch (e: Exception) { Log.e("PDFGeneration", "Erro foto shaft: ${e.message}") }
             }
-            document.add(Paragraph("\n"))
+            if (shaftCols % 2 != 0) shaftGrid.addCell(Cell().setBorder(Border.NO_BORDER))
+            document.add(shaftGrid)
         }
-        
-        // Fotos Gerais
+
+        // ── Fotos Gerais ──────────────────────────────────────────────
         if (report.photos.isNotEmpty()) {
-            document.add(Paragraph("Fotos Gerais").setFontSize(16f).setBold())
+            document.add(secHeader("FOTOS GERAIS"))
+            val photoGrid = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f))).useAllAvailableWidth().setMarginTop(4f)
+            var photoCols = 0
             for (photoPath in report.photos) {
-                Log.d("PDFGeneration", "Processando foto geral: $photoPath")
                 try {
-                    val imageFile: File? = if (photoPath.startsWith("http")) {
-                        runBlocking {
-                            Log.d("PDFGeneration", "Baixando imagem geral de URL: $photoPath (thread segura)")
-                            downloadImageToTempFile(context, photoPath, "general_photo_")
-                        }
-                    } else {
-                        val file = File(photoPath)
-                        if (file.exists()) file else null
-                    }
+                    val imageFile: File? = if (photoPath.startsWith("http"))
+                        runBlocking { downloadImageToTempFile(context, photoPath, "general_photo_") }
+                    else File(photoPath).takeIf { it.exists() }
                     if (imageFile != null && imageFile.exists()) {
-                        Log.d("PDFGeneration", "Arquivo de imagem existe: ${imageFile.absolutePath}")
-                        val imageData = ImageDataFactory.create(imageFile.absolutePath)
-                        val image = ITextImage(imageData)
-                        image.setWidth(300f)
-                        document.add(image)
-                        Log.d("PDFGeneration", "Imagem geral adicionada ao PDF")
-                        if (photoPath.startsWith("http")) {
-                            imageFile.delete()
-                            Log.d("PDFGeneration", "Arquivo temporário deletado: ${imageFile.absolutePath}")
-                        }
-                    } else {
-                        Log.e("PDFGeneration", "Arquivo de imagem não existe: $photoPath")
+                        val img = ITextImage(ImageDataFactory.create(imageFile.absolutePath)).setAutoScaleWidth(true)
+                        photoGrid.addCell(Cell().add(img).setBorder(Border.NO_BORDER).setPadding(4f))
+                        if (photoPath.startsWith("http")) imageFile.delete()
+                        photoCols++
                     }
-                } catch (e: Exception) {
-                    Log.e("PDFGeneration", "Error adding general photo: ${e.message}")
-                }
+                } catch (e: Exception) { Log.e("PDFGeneration", "Erro foto geral: ${e.message}") }
             }
+            if (photoCols % 2 != 0) photoGrid.addCell(Cell().setBorder(Border.NO_BORDER))
+            document.add(photoGrid)
         }
-        
+
         document.close()
         
         // Abrir o PDF gerado
@@ -3169,9 +2597,10 @@ private fun generateExcel(context: AndroidContext, reports: List<Report>) {
         headerRow.createCell(13).setCellValue("Observações Gerais")
         headerRow.createCell(14).setCellValue("Responsável")
         headerRow.createCell(15).setCellValue("Telefone do Responsável")
-        
+        headerRow.createCell(16).setCellValue("CEP")
+
         // Aplicar estilo de cabeçalho
-        for (i in 0..15) {
+        for (i in 0..16) {
             headerRow.getCell(i).cellStyle = headerStyle
         }
         
@@ -3203,15 +2632,13 @@ private fun generateExcel(context: AndroidContext, reports: List<Report>) {
                 row.createCell(13).setCellValue(report.observacoesGerais)
                 row.createCell(14).setCellValue(report.responsavelNome)
                 row.createCell(15).setCellValue(report.responsavelTelefone)
-                
+                row.createCell(16).setCellValue(
+                    report.cep.takeIf { it.isNotEmpty() }?.let { "${it.take(5)}-${it.drop(5)}" } ?: ""
+                )
+
                 // Aplicar estilo de quebra de texto em todas as células
-                for (i in 0..15) {
+                for (i in 0..16) {
                     row.getCell(i).cellStyle = cellStyle
-                }
-                if (row.lastCellNum > 16) {
-                    for (i in 0..row.lastCellNum-1) {
-                        row.getCell(i).cellStyle = cellStyle
-                    }
                 }
             } catch (e: Exception) {
                 Log.e("ExcelGeneration", "Erro ao preencher dados da linha ${rowIndex + 1}: ${e.message}", e)
@@ -3236,8 +2663,7 @@ private fun generateExcel(context: AndroidContext, reports: List<Report>) {
         sheet.setColumnWidth(13, 50 * 256) // Observações Gerais
         sheet.setColumnWidth(14, 30 * 256) // Responsável (Edifício)
         sheet.setColumnWidth(15, 20 * 256) // Telefone do Responsável (Edifício)
-        sheet.setColumnWidth(16, 30 * 256) // Responsável pela Vistoria (Novo campo)
-        sheet.setColumnWidth(17, 20 * 256) // Telefone do Responsável pela Vistoria (Novo campo)
+        sheet.setColumnWidth(16, 15 * 256) // CEP
         
         Log.d("ExcelGeneration", "Preparando para salvar arquivo")
         // Salvar arquivo no diretório de downloads
